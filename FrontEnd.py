@@ -28,7 +28,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 # If you prefer to hardcode an API key directly in this file (not recommended for production),
 # put it here as a string. Leave empty to use environment or Streamlit secrets.
-GROQ_API_KEY_DIRECT = ""
+#"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" = ""
 GROQ_BASE_URL_DIRECT = ""
 GEMINI_API_KEY_DIRECT = ""
 
@@ -373,9 +373,6 @@ def transcribe_audio(audio_bytes: bytes) -> str:
 
 def parse_and_render_segments(content: str) -> None:
     """Render Markdown text mixed with fenced code blocks."""
-    # Defensive: some backends may return dicts; stringify them to avoid regex errors.
-    if not isinstance(content, str):
-        content = str(content)
     start = 0
     for match in CODE_BLOCK_PATTERN.finditer(content):
         text_chunk = content[start : match.start()].strip()
@@ -389,72 +386,6 @@ def parse_and_render_segments(content: str) -> None:
     tail = content[start:].strip()
     if tail:
         st.markdown(tail)
-
-
-def _safely_convert_to_dict(value: Any) -> Optional[Dict[str, Any]]:
-    """Try to turn response-like objects into plain dicts for parsing."""
-    if isinstance(value, dict):
-        return value
-
-    to_dict = getattr(value, "to_dict", None)
-    if callable(to_dict):
-        try:
-            return to_dict()
-        except Exception:
-            pass
-
-    dict_method = getattr(value, "dict", None)
-    if callable(dict_method):
-        try:
-            return dict_method()
-        except Exception:
-            pass
-
-    if hasattr(value, "__dict__"):
-        try:
-            return {k: v for k, v in value.__dict__.items() if not k.startswith("_")}
-        except Exception:
-            pass
-
-    return None
-
-
-def extract_text_from_response(value: Any) -> str:
-    """Coerce nested SDK/HTTP responses into a readable assistant text."""
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        for item in value:
-            text = extract_text_from_response(item)
-            if text:
-                return text
-        return ""
-
-    data = _safely_convert_to_dict(value)
-    if data:
-        for key in ("output_text", "response_text", "text", "result"):
-            candidate = data.get(key)
-            if isinstance(candidate, str) and candidate.strip():
-                return candidate.strip()
-
-        for list_key in ("output", "choices", "responses", "items", "content"):
-            nested = data.get(list_key)
-            if isinstance(nested, list):
-                for chunk in nested:
-                    chunk_text = extract_text_from_response(chunk)
-                    if chunk_text:
-                        return chunk_text
-
-        message = data.get("message")
-        if isinstance(message, dict):
-            content = message.get("content")
-            chunk_text = extract_text_from_response(content)
-            if chunk_text:
-                return chunk_text
-
-    return str(value)
 
 
 def render_chat_history(messages: List[Dict[str, Any]]) -> None:
@@ -568,32 +499,28 @@ def send_to_backend(
     # Groq / OpenAI-compatible (gpt-oss-120b)
     # --------------------
     if model == "gpt-oss-120b":
-        groq_api_key = get_secret_or_env("GROQ_API_KEY") or GROQ_API_KEY_DIRECT or None
+        groq_api_key = get_secret_or_env("GROQ_API_KEY")
+        # allow hardcoded fallback for convenience during local testing
+        if not groq_api_key and "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":
+            groq_api_key = "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".strip() or None
+
         groq_base = get_secret_or_env("GROQ_BASE_URL") or GROQ_BASE_URL_DIRECT or "https://api.groq.com/openai/v1"
         if not groq_api_key:
             return "[GROQ API key not found. Set `GROQ_API_KEY` in Streamlit secrets, environment variables, or `GROQ_API_KEY_DIRECT` in this file.]"
 
-        # First try the OpenAI-compatible SDK with explicit api_key/base_url (matches your snippet)
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=groq_api_key, base_url=groq_base)
-            resp = client.responses.create(input=user_prompt, model="openai/gpt-oss-120b")
-            return extract_text_from_response(resp)
-        except Exception:
-            # SDK failed — fall back to direct HTTP POST
+            # Prefer a simple HTTP call to avoid SDK secret-loading issues
+            headers = {"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"}
+            payload = {"input": user_prompt, "model": "openai/gpt-oss-120b"}
+            resp = requests.post(f"{groq_base.rstrip('/')}/responses", json=payload, headers=headers, timeout=30)
             try:
-                headers = {"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"}
-                payload = {"input": user_prompt, "model": "openai/gpt-oss-120b"}
-                resp = requests.post(f"{groq_base.rstrip('/')}/responses", json=payload, headers=headers, timeout=30)
-                try:
-                    data = resp.json()
-                except Exception:
-                    return resp.text
-                text = extract_text_from_response(data)
-                return text or resp.text
-            except Exception as http_err:
-                return f"[Error calling Groq/OpenAI endpoint: {http_err}]"
+                data = resp.json()
+                text = data.get("output_text") or data.get("text") or data.get("result") or str(data)
+            except Exception:
+                text = resp.text
+            return text
+        except Exception as http_err:
+            return f"[Error calling Groq/OpenAI endpoint: {http_err}]"
 
     # --------------------
     # Google GenAI (gemini-2.5-flash)
@@ -615,7 +542,9 @@ def send_to_backend(
 
             client = genai.Client(api_key=genai_api_key)
             resp = client.models.generate_content(model="gemini-2.5-flash", contents=user_prompt)
-            return extract_text_from_response(resp)
+            # SDK may expose .text or .response
+            text = getattr(resp, "text", None) or getattr(resp, "response", None) or str(resp)
+            return text
         except Exception as e:
             return f"[GenAI SDK error: {e}. Install `google-genai` and ensure `GEMINI_API_KEY` is configured.]"
 
