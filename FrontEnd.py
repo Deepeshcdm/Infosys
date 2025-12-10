@@ -1,19 +1,19 @@
-"""Streamlit ChatGPT-style frontend with image and voice input support."""
-"""
-The Python script is a Streamlit frontend for a ChatGPT-style chat interface with support for image
-and voice input, allowing users to interact with an AI assistant for various tasks.
+# """Streamlit ChatGPT-style frontend with image and voice input support."""
+# """
+# The Python script is a Streamlit frontend for a ChatGPT-style chat interface with support for image
+# and voice input, allowing users to interact with an AI assistant for various tasks.
 
-:param title: The `title` parameter in the code is used to specify the title of a chat conversation.
-It can be provided when creating a new chat or when updating the title of an existing chat. The
-title helps identify and differentiate between different chat conversations, making it easier for
-users to manage and navigate through their
-:type title: Optional[str]
-:return: The code provided is a Streamlit frontend application that simulates a chat interface with
-ChatGPT-style functionality. It includes features such as image and voice input support. The code
-defines functions for creating and managing chat conversations, rendering chat history, handling
-user prompts, injecting custom CSS for styling, and interacting with the backend to generate
-responses based on user input.
-"""
+# :param title: The `title` parameter in the code is used to specify the title of a chat conversation.
+# It can be provided when creating a new chat or when updating the title of an existing chat. The
+# title helps identify and differentiate between different chat conversations, making it easier for
+# users to manage and navigate through their
+# :type title: Optional[str]
+# :return: The code provided is a Streamlit frontend application that simulates a chat interface with
+# ChatGPT-style functionality. It includes features such as image and voice input support. The code
+# defines functions for creating and managing chat conversations, rendering chat history, handling
+# user prompts, injecting custom CSS for styling, and interacting with the backend to generate
+# responses based on user input.
+# """
 
 import base64
 import io
@@ -22,6 +22,15 @@ from typing import Any, Dict, List, Optional
 
 import streamlit as st
 from PIL import Image
+import os
+import requests
+from streamlit.errors import StreamlitSecretNotFoundError
+
+# If you prefer to hardcode an API key directly in this file (not recommended for production),
+# put it here as a string. Leave empty to use environment or Streamlit secrets.
+GROQ_API_KEY_DIRECT = ""
+GROQ_BASE_URL_DIRECT = ""
+GEMINI_API_KEY_DIRECT = ""
 
 # Audio processing imports
 try:
@@ -31,10 +40,25 @@ except ImportError:
     SPEECH_RECOGNITION_AVAILABLE = False
 
 
-CHAT_MODES = ["Chat", "Generate Code", "Explain Code", "Analyze Image"]
+CHAT_MODES = ["Chat", "Generate Code", "Explain Code"]
 MODEL_OPTIONS = ["gpt-oss-120b", "gemini-2.5-flash", "deepseek-r1"]
 DEFAULT_SYSTEM_PROMPT = "You are ChatGPT, a large language model trained by OpenAI. You are helpful, creative, clever, and very friendly."
 CODE_BLOCK_PATTERN = re.compile(r"```(?P<lang>[\w+\-]*)\n(?P<code>.*?)```", re.DOTALL)
+
+
+def get_secret_or_env(key: str) -> Optional[str]:
+    """Fetch a secret from environment first, then Streamlit secrets (safely)."""
+    env_val = os.environ.get(key)
+    if env_val:
+        return env_val
+    try:
+        if hasattr(st, "secrets"):
+            return st.secrets.get(key)
+    except StreamlitSecretNotFoundError:
+        return None
+    except Exception:
+        return None
+    return None
 
 
 def create_persistent_chat(title: Optional[str] = None) -> str:
@@ -349,6 +373,9 @@ def transcribe_audio(audio_bytes: bytes) -> str:
 
 def parse_and_render_segments(content: str) -> None:
     """Render Markdown text mixed with fenced code blocks."""
+    # Defensive: some backends may return dicts; stringify them to avoid regex errors.
+    if not isinstance(content, str):
+        content = str(content)
     start = 0
     for match in CODE_BLOCK_PATTERN.finditer(content):
         text_chunk = content[start : match.start()].strip()
@@ -362,6 +389,72 @@ def parse_and_render_segments(content: str) -> None:
     tail = content[start:].strip()
     if tail:
         st.markdown(tail)
+
+
+def _safely_convert_to_dict(value: Any) -> Optional[Dict[str, Any]]:
+    """Try to turn response-like objects into plain dicts for parsing."""
+    if isinstance(value, dict):
+        return value
+
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return to_dict()
+        except Exception:
+            pass
+
+    dict_method = getattr(value, "dict", None)
+    if callable(dict_method):
+        try:
+            return dict_method()
+        except Exception:
+            pass
+
+    if hasattr(value, "__dict__"):
+        try:
+            return {k: v for k, v in value.__dict__.items() if not k.startswith("_")}
+        except Exception:
+            pass
+
+    return None
+
+
+def extract_text_from_response(value: Any) -> str:
+    """Coerce nested SDK/HTTP responses into a readable assistant text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        for item in value:
+            text = extract_text_from_response(item)
+            if text:
+                return text
+        return ""
+
+    data = _safely_convert_to_dict(value)
+    if data:
+        for key in ("output_text", "response_text", "text", "result"):
+            candidate = data.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+
+        for list_key in ("output", "choices", "responses", "items", "content"):
+            nested = data.get(list_key)
+            if isinstance(nested, list):
+                for chunk in nested:
+                    chunk_text = extract_text_from_response(chunk)
+                    if chunk_text:
+                        return chunk_text
+
+        message = data.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+            chunk_text = extract_text_from_response(content)
+            if chunk_text:
+                return chunk_text
+
+    return str(value)
 
 
 def render_chat_history(messages: List[Dict[str, Any]]) -> None:
@@ -440,28 +533,95 @@ def send_to_backend(
     model: str,
     image: Optional[Image.Image] = None,
 ) -> str:
-    """Stub that simulates an assistant reply. Connect to your actual API here."""
+    """Send messages to the selected backend model and return assistant text.
+
+    Behavior:
+    - If `model` == "gpt-oss-120b" use the Groq/OpenAI-compatible Responses API.
+      The function will first attempt to use the `openai.OpenAI` SDK if available,
+      otherwise it will POST to the configured `GROQ_BASE_URL` using `requests`.
+    - If `model` == "gemini-2.5-flash" it will try the `google.genai` SDK.
+    - For other modes/models the function falls back to a friendly stub message.
+
+    Keys:
+    - Put credentials in `st.secrets` or environment variables:
+      - `GROQ_API_KEY` and optional `GROQ_BASE_URL` for Groq/OpenAI-compatible API
+      - `GENAI_API_KEY` for Google GenAI SDK
+    """
+
     user_prompt = next(
         (msg.get("content", "") for msg in reversed(messages) if msg.get("role") == "user"),
         "",
     )
 
-    if not user_prompt and not image:
-        return "Hi there! I'm ChatGPT. How can I help you today? You can ask me questions, upload images for analysis, or even use voice input! 🎯"
+    # If there is an image, attach a short descriptor to the prompt
+    if image is not None:
+        try:
+            b64 = image_to_base64(image)
+            user_prompt = f"[Image attached: base64_png({len(b64)} bytes)]\n\n" + user_prompt
+        except Exception:
+            user_prompt = "[Image attached]\n\n" + user_prompt
 
-    # Handle image analysis
-    if image:
-        return (
-            "I can see the image you've shared! 🖼️\n\n"
-            "**Image Analysis:**\n"
-            "This appears to be an interesting image. Here's what I observe:\n\n"
-            "- **Content:** I can identify the main elements in your image\n"
-            "- **Context:** The image seems to convey specific information\n"
-            "- **Quality:** The image resolution is suitable for analysis\n\n"
-            "*Note: Connect this to GPT-4 Vision API for actual image analysis.*\n\n"
-            "What would you like to know about this image?"
-        )
+    if not user_prompt:
+        return "Hi there! Send a message or upload an image and I'll respond."
 
+    # --------------------
+    # Groq / OpenAI-compatible (gpt-oss-120b)
+    # --------------------
+    if model == "gpt-oss-120b":
+        groq_api_key = get_secret_or_env("GROQ_API_KEY") or GROQ_API_KEY_DIRECT or None
+        groq_base = get_secret_or_env("GROQ_BASE_URL") or GROQ_BASE_URL_DIRECT or "https://api.groq.com/openai/v1"
+        if not groq_api_key:
+            return "[GROQ API key not found. Set `GROQ_API_KEY` in Streamlit secrets, environment variables, or `GROQ_API_KEY_DIRECT` in this file.]"
+
+        # First try the OpenAI-compatible SDK with explicit api_key/base_url (matches your snippet)
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=groq_api_key, base_url=groq_base)
+            resp = client.responses.create(input=user_prompt, model="openai/gpt-oss-120b")
+            return extract_text_from_response(resp)
+        except Exception:
+            # SDK failed — fall back to direct HTTP POST
+            try:
+                headers = {"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"}
+                payload = {"input": user_prompt, "model": "openai/gpt-oss-120b"}
+                resp = requests.post(f"{groq_base.rstrip('/')}/responses", json=payload, headers=headers, timeout=30)
+                try:
+                    data = resp.json()
+                except Exception:
+                    return resp.text
+                text = extract_text_from_response(data)
+                return text or resp.text
+            except Exception as http_err:
+                return f"[Error calling Groq/OpenAI endpoint: {http_err}]"
+
+    # --------------------
+    # Google GenAI (gemini-2.5-flash)
+    # --------------------
+    if model == "gemini-2.5-flash":
+        # Check API key first to avoid SDK attempting to read secrets.toml and erroring
+        genai_api_key = get_secret_or_env("GENAI_API_KEY") or get_secret_or_env("GEMINI_API_KEY")
+        # allow hardcoded fallback for convenience during local testing
+        if not genai_api_key and GEMINI_API_KEY_DIRECT:
+            genai_api_key = GEMINI_API_KEY_DIRECT.strip() or None
+
+        if not genai_api_key:
+            return "[GenAI API key not found. Set `GENAI_API_KEY`/`GEMINI_API_KEY` in Streamlit secrets, environment variables, or `GEMINI_API_KEY_DIRECT` in this file.]"
+
+        try:
+            # Ensure the SDK can see the key via environment before importing
+            os.environ.setdefault("GEMINI_API_KEY", genai_api_key)
+            from google import genai
+
+            client = genai.Client(api_key=genai_api_key)
+            resp = client.models.generate_content(model="gemini-2.5-flash", contents=user_prompt)
+            return extract_text_from_response(resp)
+        except Exception as e:
+            return f"[GenAI SDK error: {e}. Install `google-genai` and ensure `GEMINI_API_KEY` is configured.]"
+
+    # --------------------
+    # Mode-based helper behavior (existing helpful stubs)
+    # --------------------
     if mode == "Generate Code":
         return (
             f"Here's the code you requested! 🚀\n\n"
@@ -492,30 +652,12 @@ def send_to_backend(
             "Any questions about specific parts?"
         )
 
-    if mode == "Analyze Image":
-        return (
-            "I'm ready to analyze images! 🔍\n\n"
-            "To analyze an image:\n"
-            "1. Click the **📷 Image** button below the chat\n"
-            "2. Upload your image\n"
-            "3. Ask me what you'd like to know about it\n\n"
-            "I can help with:\n"
-            "- Describing image contents\n"
-            "- Extracting text (OCR)\n"
-            "- Answering questions about the image\n"
-            "- Identifying objects and patterns"
-        )
-
-    # Default conversational response
+    # Default fallback
     return (
-        f"Great question! Let me help you with that. 💭\n\n"
-        f"Based on what you've asked about, here's my response:\n\n"
-        f"Your input: *\"{user_prompt[:100]}{'...' if len(user_prompt) > 100 else ''}\"*\n\n"
-        "I'm a demo interface right now. To get real responses:\n"
-        "1. Connect to OpenAI's API in the `send_to_backend` function\n"
-        "2. Use your API key with the selected model\n"
-        f"3. Current model selection: `{model}`\n\n"
-        "Is there anything else I can help you with? 🤗"
+        f"Great question! Here's a friendly stub reply while the model call is not configured.\n\n"
+        f"Your input: \"{user_prompt[:100]}{'...' if len(user_prompt) > 100 else ''}\"\n\n"
+        f"Selected model: `{model}`\n"
+        "To enable live responses, set API keys in Streamlit `secrets.toml` or environment variables and install the SDKs."
     )
 
 
