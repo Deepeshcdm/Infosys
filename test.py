@@ -59,7 +59,7 @@ def stream_generate(model: str, prompt: str):
         return "".join(full_text)
 
 prompt = input("Enter your prompt: ").strip()
-MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1"]
+MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1","qwen3-vl:2b"]
 option = input(f"Enter model name {MODEL_OPTIONS}: ").strip()
 if option not in MODEL_OPTIONS:
     print("Invalid model name. Please choose from the available options.")

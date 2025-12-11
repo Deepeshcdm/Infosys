@@ -1,495 +1,3 @@
-# """Streamlit ChatGPT-style frontend tailored for coding workflows."""
-
-# import re
-# from typing import Any, Dict, List
-
-# import streamlit as st
-
-
-# CHAT_MODES = ["Generate Code", "Explain Code"]
-# MODEL_OPTIONS = ["gpt-5-mini", "gpt-5-mini-code", "custom-model"]
-# DEFAULT_SYSTEM_PROMPT = "You are a senior AI pair programmer who writes and explains clean code."
-# CODE_BLOCK_PATTERN = re.compile(r"```(?P<lang>[\w+\-]*)\n(?P<code>.*?)```", re.DOTALL)
-
-
-
-# def create_persistent_chat(title: str = "New chat") -> str:
-#     """Create a saved conversation and return its identifier."""
-#     chat_id = str(st.session_state.chat_counter)
-#     st.session_state.chat_counter += 1
-#     st.session_state.chats[chat_id] = {"title": title, "messages": []}
-#     return chat_id
-
-
-# def ensure_current_chat() -> None:
-#     """Make sure we have at least one persistent chat selected."""
-#     if not st.session_state.chats:
-#         chat_id = create_persistent_chat()
-#         st.session_state.current_chat_id = chat_id
-#     elif st.session_state.current_chat_id not in st.session_state.chats:
-#         st.session_state.current_chat_id = next(iter(st.session_state.chats.keys()))
-
-
-# def init_session_state() -> None:
-#     """Bootstrap all keys required by the UI."""
-#     st.session_state.setdefault("chat_counter", 1)
-#     st.session_state.setdefault("chats", {})
-#     st.session_state.setdefault("current_chat_id", "")
-#     st.session_state.setdefault("is_temp_chat", False)
-#     st.session_state.setdefault("temp_messages", [])
-#     st.session_state.setdefault("display_name", "Developer")
-#     st.session_state.setdefault("mode_select", CHAT_MODES[0])
-#     st.session_state.setdefault("model_select", MODEL_OPTIONS[0])
-#     st.session_state.setdefault("system_prompt_area", DEFAULT_SYSTEM_PROMPT)
-#     st.session_state.setdefault("show_search_box", False)
-#     st.session_state.setdefault("chat_search", "")
-#     st.session_state.setdefault("sidebar_notice", "")
-
-#     ensure_current_chat()
-
-
-# def inject_custom_css() -> None:
-#     """Inject a lightweight dark theme + sidebar styling to mimic ChatGPT."""
-#     st.markdown(
-#         """
-#         <style>
-#         :root { color-scheme: dark; }
-#         body, .stApp, .block-container {
-#             background-color: #050509;
-#             color: #f5f7ff;
-#         }
-#         .block-container {
-#             padding-top: 2.5rem;
-#             padding-bottom: 5rem;
-#             max-width: 900px;
-#         }
-#         div[data-testid="stSidebar"] {
-#             background-color: #0c0f1a;
-#             border-right: 1px solid #191d2d;
-#         }
-#         div[data-testid="stSidebar"] * {
-#             color: #e0e6ff !important;
-#         }
-#         .sidebar-logo {
-#             font-size: 1.05rem;
-#             letter-spacing: 0.08em;
-#             text-transform: uppercase;
-#             font-weight: 600;
-#             display: flex;
-#             align-items: center;
-#             gap: 0.4rem;
-#             margin-bottom: 1rem;
-#         }
-#         .sidebar-nav {
-#             display: flex;
-#             flex-direction: column;
-#             gap: 0.35rem;
-#             margin: 1rem 0 1.4rem 0;
-#         }
-#         .sidebar-nav-item {
-#             display: flex;
-#             align-items: center;
-#             gap: 0.55rem;
-#             padding: 0.45rem 0.75rem;
-#             border-radius: 12px;
-#             border: 1px solid rgba(255,255,255,0.05);
-#             background: rgba(255,255,255,0.02);
-#             font-size: 0.9rem;
-#         }
-#         .sidebar-section-title {
-#             text-transform: uppercase;
-#             font-size: 0.75rem;
-#             letter-spacing: 0.14em;
-#             color: #8f96c2;
-#             margin-bottom: 0.4rem;
-#         }
-#         .shortcut-btn button,
-#         .shortcut-row button {
-#             width: 100%;
-#             border-radius: 12px;
-#             border: 1px solid rgba(255,255,255,0.05);
-#             background: rgba(255,255,255,0.02);
-#             font-size: 0.9rem;
-#             padding: 0.45rem 0.6rem;
-#         }
-#         .shortcut-row button {
-#             font-size: 0.85rem;
-#             padding: 0.35rem 0.45rem;
-#         }
-#         .gpt-pill-row {
-#             display: flex;
-#             gap: 0.5rem;
-#         }
-#         .gpt-pill {
-#             padding: 0.35rem 0.85rem;
-#             border-radius: 999px;
-#             border: 1px solid #2f3547;
-#             font-size: 0.85rem;
-#             color: #dfe4ff;
-#             background: rgba(255,255,255,0.04);
-#         }
-#         .chat-item-radio div[role="radiogroup"] > div {
-#             background: rgba(255,255,255,0.02);
-#             border: 1px solid rgba(255,255,255,0.05);
-#             padding: 0.4rem 0.6rem;
-#             border-radius: 12px;
-#             margin-bottom: 0.35rem;
-#         }
-#         .chat-item-radio label {
-#             width: 100%;
-#         }
-#         .chat-item-radio div[role="radiogroup"] input:checked + div {
-#             border-color: #7a83ff;
-#             background: rgba(122,131,255,0.08);
-#         }
-#         div[data-testid="stChatMessage"] {
-#             margin-bottom: 1.2rem;
-#         }
-#         .chat-bubble {
-#             width: 100%;
-#             border-radius: 18px;
-#             border: 1px solid #1f2335;
-#             padding: 1rem 1.25rem;
-#             margin-top: 0.25rem;
-#             box-shadow: 0 0 40px rgba(4, 6, 15, 0.65);
-#             background: #0e1425;
-#         }
-#         .assistant-bubble { background: linear-gradient(145deg, #10182d, #0b0f1a); }
-#         .user-bubble { background: linear-gradient(145deg, #1c2339, #13192b); }
-#         .hero-card {
-#             text-align: center;
-#             margin: 6rem auto 4rem auto;
-#             padding: 4rem 2rem;
-#             max-width: 680px;
-#         }
-#         .hero-pill {
-#             display: inline-flex;
-#             border: 1px solid #2f3244;
-#             border-radius: 999px;
-#             padding: 0.15rem 0.9rem;
-#             font-size: 0.9rem;
-#             letter-spacing: 0.08em;
-#             text-transform: uppercase;
-#             color: #9ea3c7;
-#             margin-bottom: 1rem;
-#         }
-#         .hero-title {
-#             font-size: clamp(2.5rem, 5vw, 3.6rem);
-#             font-weight: 600;
-#             color: #f9fbff;
-#             margin-bottom: 0.6rem;
-#         }
-#         .hero-subtitle { color: #99a1c7; font-size: 1.2rem; }
-#         div[data-testid="stChatInput"] > div {
-#             border: 1px solid #20283d;
-#             border-radius: 22px;
-#             background: #0d1322;
-#             padding: 0.4rem 0.6rem;
-#             box-shadow: 0 10px 45px rgba(5, 8, 20, 0.45);
-#         }
-#         div[data-testid="stChatInput"] textarea {
-#             background: transparent !important;
-#             color: #f5f7ff !important;
-#         }
-#         div[data-testid="stSidebar"] button {
-#             border-radius: 16px;
-#             border: 1px solid #2f3547;
-#             background: #161c2e;
-#         }
-#         div[data-testid="stSidebar"] button:hover {
-#             border-color: #6b72ff;
-#         }
-#         </style>
-#         """,
-#         unsafe_allow_html=True,
-#     )
-
-
-# def set_sidebar_notice(message: str) -> None:
-#     """Store a short notice message for sidebar alerts."""
-#     st.session_state.sidebar_notice = message
-
-
-# def get_active_messages() -> List[Dict[str, Any]]:
-#     """Return the list that represents the active conversation."""
-#     if st.session_state.is_temp_chat:
-#         return st.session_state.temp_messages
-#     return st.session_state.chats[st.session_state.current_chat_id]["messages"]
-
-
-# def parse_and_render_segments(content: str) -> None:
-#     """Render Markdown text mixed with fenced code blocks."""
-#     start = 0
-#     for match in CODE_BLOCK_PATTERN.finditer(content):
-#         text_chunk = content[start : match.start()].strip()
-#         if text_chunk:
-#             st.markdown(text_chunk)
-
-#         language = match.group("lang") or "text"
-#         st.code(match.group("code"), language=language.strip())
-#         start = match.end()
-
-#     tail = content[start:].strip()
-#     if tail:
-#         st.markdown(tail)
-
-
-# def render_chat_history(messages: List[Dict[str, Any]]) -> None:
-#     """Loop through session messages and display them with avatars and bubbles."""
-#     for message in messages:
-#         role = message.get("role", "assistant")
-#         avatar = "🧑" if role == "user" else "🤖"
-#         with st.chat_message(role, avatar=avatar):
-#             bubble_class = "user-bubble" if role == "user" else "assistant-bubble"
-#             st.markdown(f"<div class='chat-bubble {bubble_class}'>", unsafe_allow_html=True)
-#             parse_and_render_segments(message.get("content", ""))
-#             st.markdown("</div>", unsafe_allow_html=True)
-
-
-# def render_empty_state(display_name: str) -> None:
-#     """Hero section that mirrors ChatGPT's welcome card when chat is empty."""
-#     st.markdown(
-#         f"""
-#         <div class="hero-card">
-#             <div class="hero-pill">CODE GEN AI</div>
-#             <div class="hero-title">Hey, {display_name}. Ready to dive in?</div>
-#             <div class="hero-subtitle">Ask anything about code — generation, debugging, or explanation.</div>
-#         </div>
-#         """,
-#         unsafe_allow_html=True,
-#     )
-
-
-# def clear_conversation() -> None:
-#     """Clear only the currently active conversation."""
-#     messages = get_active_messages()
-#     messages.clear()
-
-
-# def summarize_title(prompt: str) -> str:
-#     """Generate a short title from the first user message."""
-#     condensed = prompt.strip().splitlines()[0][:36]
-#     return condensed + ("…" if len(prompt.strip()) > len(condensed) else "") or "New chat"
-
-
-# def send_to_backend(
-#     messages: List[Dict[str, Any]],
-#     *,
-#     mode: str,
-#     system_prompt: str,
-#     model: str,
-# ) -> str:
-#     """Stub that simulates an assistant reply."""
-#     user_prompt = next(
-#         (msg.get("content", "") for msg in reversed(messages) if msg.get("role") == "user"),
-#         "",
-#     )
-
-#     if not user_prompt:
-#         return "I'm ready whenever you are. Ask me something about code!"
-
-#     if mode == "Generate Code":
-#         return (
-#             "Here's a quick scaffold inspired by your request. Customize or expand it once you plug in "
-#             "your Ollama backend.\n\n"
-#             "```python\n"
-#             "def generated_solution(*args, **kwargs):\n"
-#             "    \"\"\"Auto-generated stub based on your latest prompt.\"\"\"\n"
-#             "    # TODO: replace with the logic you need\n"
-#             "    raise NotImplementedError('Hook this up to your Ollama call')\n"
-#             "```\n\n"
-#             "**What to do next**\n"
-#             "1. Replace this stub with code streamed from your model.\n"
-#             "2. Use the system prompt to enforce style or testing preferences.\n"
-#             f"3. Model selector currently reads `{model}` for you to map to a real deployment."
-#         )
-
-#     if mode == "Explain Code":
-#         summary = (
-#             "I scanned the snippet you shared and prepared a concise explanation. "
-#             "Swap this out with a real analysis response once Ollama is wired up."
-#         )
-#         bullets = (
-#             "- **What it does:** Parses your input, performs the described transformation, and returns the result.\n"
-#             "- **Key considerations:** Consider adding docstrings, logging, and unit tests.\n"
-#             "- **Complexity:** Roughly O(n) with respect to the input size.\n"
-#         )
-#         return f"{summary}\n\n{bullets}\n\nLet me know if you want a refactor or test suite."
-
-#     return (
-#         "Frontend is live! Pick a mode in the sidebar or wire `send_to_backend` to Ollama "
-#         "for real responses."
-#     )
-
-
-# def handle_user_prompt(user_prompt: str, mode: str, system_prompt: str, model: str) -> None:
-#     """Persist the new user prompt, get assistant reply, and re-render."""
-#     messages = get_active_messages()
-#     messages.append({"role": "user", "content": user_prompt})
-#     assistant_reply = send_to_backend(
-#         messages,
-#         mode=mode,
-#         system_prompt=system_prompt,
-#         model=model,
-#     )
-#     messages.append({"role": "assistant", "content": assistant_reply})
-
-#     if not st.session_state.is_temp_chat:
-#         chat_meta = st.session_state.chats[st.session_state.current_chat_id]
-#         if chat_meta["title"] == "New chat" and user_prompt.strip():
-#             chat_meta["title"] = summarize_title(user_prompt)
-
-
-# def start_new_chat() -> None:
-#     """Start a fresh conversation respecting the temp toggle."""
-#     if st.session_state.is_temp_chat:
-#         st.session_state.temp_messages = []
-#     else:
-#         chat_id = create_persistent_chat()
-#         st.session_state.current_chat_id = chat_id
-
-
-# def render_chat_list() -> None:
-#     """Renderable list of saved chats similar to ChatGPT sidebar."""
-#     if not st.session_state.chats:
-#         st.caption("No saved chats yet. Start typing to create one.")
-#         return
-
-#     chat_ids = list(st.session_state.chats.keys())
-#     query = st.session_state.chat_search.strip().lower()
-#     if query:
-#         chat_ids = [cid for cid in chat_ids if query in st.session_state.chats[cid]["title"].lower()]
-#         if not chat_ids:
-#             st.caption("No chats match your search.")
-#             return
-
-#     current_id = st.session_state.current_chat_id
-#     if current_id not in chat_ids:
-#         current_id = chat_ids[0]
-#         st.session_state.current_chat_id = current_id
-
-#     index = chat_ids.index(current_id)
-#     selection = st.radio(
-#         "Your chats",
-#         options=chat_ids,
-#         index=index,
-#         format_func=lambda cid: st.session_state.chats[cid]["title"],
-#         label_visibility="collapsed",
-#         key="chat_history_selector",
-#     )
-#     if selection != current_id:
-#         st.session_state.current_chat_id = selection
-
-
-# def render_sidebar() -> tuple[str, str, str]:
-#     """Full sidebar layout including nav, GPTs, chats, and assistant controls."""
-#     with st.sidebar:
-#         st.markdown('<div class="sidebar-logo">⚪ CODE GEN AI</div>', unsafe_allow_html=True)
-#         if st.button("＋ New chat", use_container_width=True):
-#             start_new_chat()
-
-#         st.markdown('<div class="sidebar-section-title">Shortcuts</div>', unsafe_allow_html=True)
-#         if st.button("🔍 Search chats", key="nav_search", use_container_width=True):
-#             st.session_state.show_search_box = not st.session_state.show_search_box
-#             if not st.session_state.show_search_box:
-#                 st.session_state.chat_search = ""
-
-#         if st.session_state.show_search_box:
-#             st.text_input(
-#                 "Search your conversations",
-#                 key="chat_search",
-#                 placeholder="Type to filter chat titles",
-#             )
-
-#         col1, col2 = st.columns(2)
-#         with col1:
-#             if st.button("📚 Library", key="nav_library", use_container_width=True):
-#                 set_sidebar_notice("Library is a placeholder — connect docs or snippets later.")
-#         with col2:
-#             if st.button("🗂️ Projects", key="nav_projects", use_container_width=True):
-#                 set_sidebar_notice("Projects hub coming soon. Map repos or tasks here.")
-
-#         if st.session_state.sidebar_notice:
-#             st.info(st.session_state.sidebar_notice)
-#             if st.button("Dismiss", key="nav_dismiss", use_container_width=True):
-#                 st.session_state.sidebar_notice = ""
-
-#         temp_toggle = st.toggle(
-#             "Temporary chat",
-#             value=st.session_state.is_temp_chat,
-#             help="When enabled, chats are not saved to history.",
-#         )
-#         if temp_toggle != st.session_state.is_temp_chat:
-#             st.session_state.is_temp_chat = temp_toggle
-#             if temp_toggle:
-#                 st.session_state.temp_messages = []
-#             else:
-#                 ensure_current_chat()
-
-#         if st.session_state.is_temp_chat:
-#             st.caption("Temporary chat is on. Nothing will show up under 'Your chats'.")
-#         else:
-#             st.markdown('<div class="sidebar-section-title">Your chats</div>', unsafe_allow_html=True)
-#             with st.container():
-#                 st.markdown('<div class="chat-item-radio">', unsafe_allow_html=True)
-#                 render_chat_list()
-#                 st.markdown('</div>', unsafe_allow_html=True)
-
-          
-#         st.markdown("---")
-#         st.subheader("Assistant Controls")
-#         display_name = st.text_input("Display name", value=st.session_state.display_name)
-#         st.session_state.display_name = display_name or "Developer"
-
-#         mode = st.selectbox("Mode", options=CHAT_MODES, key="mode_select")
-#         model = st.selectbox("Model (placeholder)", options=MODEL_OPTIONS, key="model_select")
-#         system_prompt = st.text_area(
-#             "System prompt",
-#             value=DEFAULT_SYSTEM_PROMPT,
-#             height=120,
-#             key="system_prompt_area",
-#         )
-
-#         if st.button("Clear conversation", use_container_width=True):
-#             clear_conversation()
-#             st.rerun()
-
-#         st.caption("Backend stub: edit `send_to_backend` in FrontEnd.py to call Ollama/OpenAI.")
-
-#     return mode, model, system_prompt
-
-
-# def main() -> None:
-#     st.set_page_config(page_title="ChatGPT-style Code Companion", layout="wide")
-#     inject_custom_css()
-#     init_session_state()
-
-#     # Simplified UI: no sidebar. Display a small header and the hero/home content.
-#     st.markdown('<div class="sidebar-logo">⚪ CODE GEN AI</div>', unsafe_allow_html=True)
-
-#     # Use default mode/model/system_prompt values (sidebar removed)
-#     mode = CHAT_MODES[0]
-#     model = MODEL_OPTIONS[0]
-#     system_prompt = st.session_state.get("system_prompt_area", DEFAULT_SYSTEM_PROMPT)
-
-#     messages = get_active_messages()
-
-#     if messages:
-#         render_chat_history(messages)
-#     else:
-#         render_empty_state(st.session_state.display_name)
-
-#     # Single prompt input for the simplified frontend
-#     user_prompt = st.chat_input("Ask anything about your code — generation, debugging, or explanation...")
-#     if user_prompt:
-#         handle_user_prompt(user_prompt.strip(), mode, system_prompt.strip(), model)
-#         st.rerun()
-
-
-# if __name__ == "__main__":
-#     main()
-
-
 import streamlit as st
 import requests
 import json
@@ -1073,9 +581,1052 @@ if user_input:
 
 # Footer
 st.divider()
+
+
+
+import streamlit as st
+import requests
+import json
+from json import JSONDecodeError
+from openai import OpenAI
+import base64
+from datetime import datetime
+import uuid
+from PIL import Image
+import io
+
+# Configuration
+API_URL = "http://localhost:11434/api/generate"
+HEADERS = {"Content-Type": "application/json"}
+MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1"]
+
+st.set_page_config(
+    page_title="Code Gen AI",
+    page_icon="✦",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
 st.markdown("""
-<div style="text-align: center; color: #666; padding: 1rem;">
-    <p>🤖 Code Gen AI - Powered by LLMs | Built with Streamlit</p>
-    <p style="font-size: 0.8rem;">Models: GPT-OSS-120B (Groq) • LLaMA 3 • DeepSeek-R1</p>
+<style>
+    /* Global Reset & Base Styles */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+    
+    .stApp {
+        background-color: #212121;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    
+    /* Hide default Streamlit elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Main container styling */
+    .main .block-container {
+        max-width: 850px !important;
+        padding-top: 1rem !important;
+        padding-bottom: 100px !important;
+        margin: 0 auto;
+    }
+    
+    /* Custom Header */
+    .chatgpt-header {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem 0;
+        border-bottom: 1px solid #3d3d3d;
+        margin-bottom: 1.5rem;
+    }
+    
+    .chatgpt-header h1 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #ececec;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .chatgpt-header .logo {
+        width: 28px;
+        height: 28px;
+        background: linear-gradient(135deg, #10a37f 0%, #1a7f64 100%);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    
+    /* Chat Container */
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        padding: 0 1rem;
+        margin-bottom: 2rem;
+    }
+    
+    /* Message Bubbles */
+    .message-wrapper {
+        display: flex;
+        flex-direction: column;
+        max-width: 100%;
+    }
+    
+    .message-wrapper.user {
+        align-items: flex-end;
+    }
+    
+    .message-wrapper.assistant {
+        align-items: flex-start;
+    }
+    
+    .message-bubble {
+        max-width: 85%;
+        padding: 1rem 1.25rem;
+        border-radius: 18px;
+        line-height: 1.6;
+        font-size: 0.95rem;
+    }
+    
+    .message-bubble.user {
+        background-color: #2f2f2f;
+        color: #ececec;
+        border-bottom-right-radius: 4px;
+    }
+    
+    .message-bubble.assistant {
+        background-color: #444654;
+        color: #d1d5db;
+        border-bottom-left-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .message-bubble pre {
+        background-color: #1e1e1e;
+        border-radius: 8px;
+        padding: 1rem;
+        overflow-x: auto;
+        margin: 0.5rem 0;
+    }
+    
+    .message-bubble code {
+        font-family: 'Fira Code', 'Consolas', monospace;
+        font-size: 0.875rem;
+    }
+    
+    /* Message Avatar */
+    .message-avatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        margin-bottom: 0.5rem;
+    }
+    
+    .message-avatar.user {
+        background-color: #5436DA;
+        color: white;
+    }
+    
+    .message-avatar.assistant {
+        background-color: #10a37f;
+        color: white;
+    }
+    
+    /* Welcome Screen */
+    .welcome-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 4rem 2rem;
+        text-align: center;
+    }
+    
+    .welcome-logo {
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #10a37f 0%, #1a7f64 100%);
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 28px;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+    }
+    
+    .welcome-title {
+        font-size: 1.75rem;
+        font-weight: 600;
+        color: #ececec;
+        margin-bottom: 0.75rem;
+    }
+    
+    .welcome-subtitle {
+        font-size: 1rem;
+        color: #8e8ea0;
+        max-width: 400px;
+        line-height: 1.5;
+    }
+    
+    /* Feature Pills */
+    .feature-pills {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 2rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .feature-pill {
+        background-color: #2f2f2f;
+        border: 1px solid #3d3d3d;
+        border-radius: 20px;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        color: #b4b4b4;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .feature-pill:hover {
+        background-color: #3d3d3d;
+        border-color: #4d4d4d;
+    }
+    
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #171717 !important;
+        border-right: 1px solid #2d2d2d;
+    }
+    
+    section[data-testid="stSidebar"] .block-container {
+        padding-top: 1rem;
+    }
+    
+    .sidebar-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .sidebar-header .logo {
+        width: 24px;
+        height: 24px;
+        background: linear-gradient(135deg, #10a37f 0%, #1a7f64 100%);
+        border-radius: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 600;
+        font-size: 12px;
+    }
+    
+    .sidebar-header span {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #ececec;
+    }
+    
+    .sidebar-section-title {
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: #8e8ea0;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 0.75rem 1rem 0.5rem;
+        margin-top: 0.5rem;
+    }
+    
+    /* Sidebar Buttons */
+    section[data-testid="stSidebar"] .stButton > button {
+        background-color: transparent !important;
+        border: 1px solid #3d3d3d !important;
+        border-radius: 8px !important;
+        color: #ececec !important;
+        font-size: 0.875rem !important;
+        padding: 0.6rem 0.75rem !important;
+        transition: all 0.15s ease !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background-color: #2f2f2f !important;
+        border-color: #4d4d4d !important;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background-color: #2f2f2f !important;
+        border-color: #10a37f !important;
+    }
+    
+    /* Chat List Items */
+    .chat-list-item {
+        display: flex;
+        align-items: center;
+        padding: 0.6rem 0.75rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+        color: #b4b4b4;
+        font-size: 0.875rem;
+        margin: 2px 0;
+    }
+    
+    .chat-list-item:hover {
+        background-color: #2f2f2f;
+    }
+    
+    .chat-list-item.active {
+        background-color: #2f2f2f;
+        color: #ececec;
+    }
+    
+    /* Input Area Styling */
+    .input-container {
+        position: fixed;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        max-width: 850px;
+        padding: 1rem 1.5rem 1.5rem;
+        background: linear-gradient(to top, #212121 85%, transparent);
+        z-index: 1000;
+    }
+    
+    .input-wrapper {
+        background-color: #2f2f2f;
+        border: 1px solid #3d3d3d;
+        border-radius: 16px;
+        padding: 0.75rem 1rem;
+        display: flex;
+        align-items: flex-end;
+        gap: 0.75rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    
+    .input-wrapper:focus-within {
+        border-color: #10a37f;
+        box-shadow: 0 0 0 2px rgba(16,163,127,0.1), 0 2px 8px rgba(0,0,0,0.15);
+    }
+    
+    /* Streamlit text area customization */
+    .stTextArea textarea {
+        background-color: transparent !important;
+        border: none !important;
+        color: #ececec !important;
+        font-size: 0.95rem !important;
+        resize: none !important;
+        padding: 0 !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+    
+    .stTextArea textarea:focus {
+        box-shadow: none !important;
+    }
+    
+    .stTextArea label {
+        display: none !important;
+    }
+    
+    /* Send Button */
+    .send-button {
+        background-color: #10a37f;
+        border: none;
+        border-radius: 8px;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+        flex-shrink: 0;
+    }
+    
+    .send-button:hover {
+        background-color: #1a7f64;
+    }
+    
+    .send-button:disabled {
+        background-color: #3d3d3d;
+        cursor: not-allowed;
+    }
+    
+    /* Input icons */
+    .input-icons {
+        display: flex;
+        gap: 0.5rem;
+        color: #8e8ea0;
+    }
+    
+    .input-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+    }
+    
+    .input-icon:hover {
+        background-color: #3d3d3d;
+    }
+    
+    /* Mode Toggle */
+    .mode-toggle {
+        display: flex;
+        background-color: #2f2f2f;
+        border-radius: 10px;
+        padding: 4px;
+        margin-bottom: 1rem;
+    }
+    
+    .mode-option {
+        flex: 1;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        color: #8e8ea0;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.15s ease;
+    }
+    
+    .mode-option.active {
+        background-color: #10a37f;
+        color: white;
+    }
+    
+    /* Temp chat banner */
+    .temp-banner {
+        background-color: #2f2f2f;
+        border: 1px solid #3d3d3d;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        color: #fbbf24;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    /* Search Input */
+    .stTextInput input {
+        background-color: #2f2f2f !important;
+        border: 1px solid #3d3d3d !important;
+        border-radius: 8px !important;
+        color: #ececec !important;
+        font-size: 0.875rem !important;
+    }
+    
+    .stTextInput input:focus {
+        border-color: #10a37f !important;
+        box-shadow: none !important;
+    }
+    
+    .stTextInput label {
+        color: #8e8ea0 !important;
+        font-size: 0.75rem !important;
+    }
+    
+    /* Select box */
+    .stSelectbox > div > div {
+        background-color: #2f2f2f !important;
+        border: 1px solid #3d3d3d !important;
+        border-radius: 8px !important;
+        color: #ececec !important;
+    }
+    
+    /* Checkbox styling */
+    .stCheckbox label {
+        color: #b4b4b4 !important;
+    }
+    
+    /* Divider */
+    hr {
+        border-color: #2d2d2d !important;
+        margin: 0.75rem 0 !important;
+    }
+    
+    /* File uploader */
+    .stFileUploader {
+        background-color: #2f2f2f;
+        border: 1px dashed #3d3d3d;
+        border-radius: 12px;
+        padding: 1.5rem;
+    }
+    
+    .stFileUploader label {
+        color: #8e8ea0 !important;
+    }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #2f2f2f;
+        border-radius: 10px;
+        padding: 4px;
+        gap: 0;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        color: #8e8ea0;
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #10a37f !important;
+        color: white !important;
+    }
+    
+    .stTabs [data-baseweb="tab-panel"] {
+        padding-top: 1rem;
+    }
+    
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #3d3d3d;
+        border-radius: 3px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #4d4d4d;
+    }
+    
+    /* Info/Warning boxes */
+    .stAlert {
+        background-color: #2f2f2f !important;
+        border: 1px solid #3d3d3d !important;
+        border-radius: 8px !important;
+        color: #b4b4b4 !important;
+    }
+    
+    /* Spinner */
+    .stSpinner > div {
+        border-top-color: #10a37f !important;
+    }
+    
+    /* Chat message override */
+    .stChatMessage {
+        background-color: transparent !important;
+        border: none !important;
+    }
+    
+    [data-testid="stChatMessageContent"] {
+        background-color: #444654 !important;
+        border-radius: 18px !important;
+        padding: 1rem 1.25rem !important;
+    }
+    
+    .stChatMessage [data-testid="stMarkdownContainer"] {
+        color: #d1d5db !important;
+    }
+    
+    /* User message specific */
+    [data-testid="stChatMessage"][data-testid-kind="user"] [data-testid="stChatMessageContent"] {
+        background-color: #2f2f2f !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# Initialize session state
+def init_session_state():
+    if "chats" not in st.session_state:
+        st.session_state.chats = {}
+    if "current_chat_id" not in st.session_state:
+        st.session_state.current_chat_id = None
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "is_temporary" not in st.session_state:
+        st.session_state.is_temporary = False
+    if "selected_chats" not in st.session_state:
+        st.session_state.selected_chats = set()
+    if "search_query" not in st.session_state:
+        st.session_state.search_query = ""
+    if "feature_mode" not in st.session_state:
+        st.session_state.feature_mode = "Code Generation"
+
+
+init_session_state()
+
+
+# Helper functions
+def generate_chat_id():
+    return str(uuid.uuid4())[:8]
+
+
+def create_new_chat(is_temporary=False):
+    chat_id = generate_chat_id()
+    st.session_state.current_chat_id = chat_id
+    st.session_state.messages = []
+    st.session_state.is_temporary = is_temporary
+    
+    if not is_temporary:
+        st.session_state.chats[chat_id] = {
+            "id": chat_id,
+            "title": "New Chat",
+            "messages": [],
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "feature_mode": st.session_state.feature_mode
+        }
+    return chat_id
+
+
+def save_current_chat():
+    if st.session_state.current_chat_id and not st.session_state.is_temporary:
+        if st.session_state.current_chat_id in st.session_state.chats:
+            st.session_state.chats[st.session_state.current_chat_id]["messages"] = st.session_state.messages
+            if st.session_state.messages:
+                first_msg = next((m["content"] for m in st.session_state.messages if m["role"] == "user"), None)
+                if first_msg:
+                    st.session_state.chats[st.session_state.current_chat_id]["title"] = first_msg[:30] + "..." if len(first_msg) > 30 else first_msg
+
+
+def load_chat(chat_id):
+    if chat_id in st.session_state.chats:
+        st.session_state.current_chat_id = chat_id
+        st.session_state.messages = st.session_state.chats[chat_id]["messages"].copy()
+        st.session_state.is_temporary = False
+        st.session_state.feature_mode = st.session_state.chats[chat_id].get("feature_mode", "Code Generation")
+
+
+def delete_selected_chats():
+    for chat_id in list(st.session_state.selected_chats):
+        if chat_id in st.session_state.chats:
+            del st.session_state.chats[chat_id]
+    st.session_state.selected_chats = set()
+    if st.session_state.current_chat_id in st.session_state.selected_chats:
+        st.session_state.current_chat_id = None
+        st.session_state.messages = []
+
+
+def clear_current_chat():
+    st.session_state.messages = []
+    if st.session_state.current_chat_id and st.session_state.current_chat_id in st.session_state.chats:
+        st.session_state.chats[st.session_state.current_chat_id]["messages"] = []
+
+
+def filter_chats(query):
+    if not query:
+        return st.session_state.chats
+    return {
+        k: v for k, v in st.session_state.chats.items()
+        if query.lower() in v["title"].lower()
+    }
+
+
+def stream_generate_ollama(model: str, prompt: str):
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": True
+    }
+    
+    try:
+        with requests.post(API_URL, headers=HEADERS, json=payload, stream=True, timeout=120) as resp:
+            resp.raise_for_status()
+            
+            for raw_line in resp.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                    
+                line = raw_line.strip()
+                try:
+                    obj = json.loads(line)
+                except JSONDecodeError:
+                    continue
+                
+                chunk_text = None
+                if "message" in obj and isinstance(obj["message"], dict):
+                    chunk_text = obj["message"].get("content")
+                elif "response" in obj:
+                    chunk_text = obj.get("response")
+                
+                if chunk_text:
+                    yield chunk_text
+                
+                if obj.get("done") is True:
+                    break
+    except requests.exceptions.RequestException as e:
+        yield f"Error connecting to Ollama: {str(e)}"
+
+
+def stream_generate_groq(prompt: str):
+    try:
+        client = OpenAI(
+            api_key="key",
+            base_url="https://api.groq.com/openai/v1",
+        )
+        
+        response = client.responses.create(
+            input=prompt,
+            model="openai/gpt-oss-120b",
+            stream=True
+        )
+        
+        for event in response:
+            if hasattr(event, "delta"):
+                delta = event.delta
+                if hasattr(delta, "text") and delta.text:
+                    yield delta.text
+                elif isinstance(delta, str):
+                    yield delta
+            elif isinstance(event, str):
+                yield event
+                
+    except Exception as e:
+        yield f"Error connecting to Groq API: {str(e)}"
+
+
+def generate_response(prompt: str, model: str, feature_mode: str):
+    if feature_mode == "Code Generation":
+        enhanced_prompt = f"""You are an expert code generator. Generate clean, well-documented, and efficient code based on the following request. Include comments explaining the code.
+
+Request: {prompt}
+
+Please provide the code with proper formatting and explanations."""
+    else:
+        enhanced_prompt = f"""You are an expert code explainer. Analyze and explain the following code in detail. Break down the logic, explain what each part does, and highlight any important concepts or patterns used.
+
+Code/Question: {prompt}
+
+Please provide a comprehensive explanation."""
+
+    if model == "gpt-oss-120b":
+        return stream_generate_groq(enhanced_prompt)
+    else:
+        return stream_generate_ollama(model, enhanced_prompt)
+
+
+def image_to_base64(image):
+    buffered = io.BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
+
+with st.sidebar:
+    # Sidebar header
+    st.markdown("""
+    <div class="sidebar-header">
+        <div class="logo">C</div>
+        <span>Code Gen AI</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # New Chat button
+    if st.button("+ New chat", use_container_width=True):
+        create_new_chat(is_temporary=False)
+        st.rerun()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Temporary", use_container_width=True, help="Chat won't be saved"):
+            create_new_chat(is_temporary=True)
+            st.rerun()
+    with col2:
+        if st.button("Clear", use_container_width=True):
+            clear_current_chat()
+            st.rerun()
+    
+    st.divider()
+    
+    # Search
+    search_query = st.text_input("Search chats", value=st.session_state.search_query, placeholder="Search...", label_visibility="collapsed")
+    st.session_state.search_query = search_query
+    
+    # Delete selected button
+    if len(st.session_state.selected_chats) > 0:
+        if st.button(f"Delete selected ({len(st.session_state.selected_chats)})", use_container_width=True):
+            delete_selected_chats()
+            st.rerun()
+    
+    st.markdown('<div class="sidebar-section-title">Previous Chats</div>', unsafe_allow_html=True)
+    
+    filtered_chats = filter_chats(search_query)
+    
+    if filtered_chats:
+        for chat_id, chat_data in sorted(filtered_chats.items(), key=lambda x: x[1]["created_at"], reverse=True):
+            col1, col2 = st.columns([0.12, 0.88])
+            
+            with col1:
+                is_selected = chat_id in st.session_state.selected_chats
+                if st.checkbox("", value=is_selected, key=f"select_{chat_id}", label_visibility="collapsed"):
+                    st.session_state.selected_chats.add(chat_id)
+                else:
+                    st.session_state.selected_chats.discard(chat_id)
+            
+            with col2:
+                is_current = chat_id == st.session_state.current_chat_id
+                button_type = "primary" if is_current else "secondary"
+                icon = "◆" if chat_data.get("feature_mode") == "Code Generation" else "◇"
+                
+                if st.button(
+                    f"{icon} {chat_data['title'][:22]}",
+                    key=f"chat_{chat_id}",
+                    use_container_width=True,
+                    type=button_type
+                ):
+                    save_current_chat()
+                    load_chat(chat_id)
+                    st.rerun()
+    else:
+        st.markdown('<p style="color: #8e8ea0; font-size: 0.85rem; padding: 0.5rem;">No chats yet</p>', unsafe_allow_html=True)
+    
+    # Temp chat indicator
+    if st.session_state.is_temporary:
+        st.markdown("""
+        <div class="temp-banner">
+            <span>⚡</span> Temporary chat - won't be saved
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# Header
+st.markdown("""
+<div class="chatgpt-header">
+    <h1><div class="logo">C</div> Code Gen AI</h1>
 </div>
 """, unsafe_allow_html=True)
+
+# Mode and Model Selection
+col1, col2 = st.columns(2)
+
+with col1:
+    feature_mode = st.selectbox(
+        "Mode",
+        ["Code Generation", "Code Explanation"],
+        index=0 if st.session_state.feature_mode == "Code Generation" else 1,
+        label_visibility="collapsed"
+    )
+    st.session_state.feature_mode = feature_mode
+
+with col2:
+    selected_model = st.selectbox(
+        "Model",
+        MODEL_OPTIONS,
+        label_visibility="collapsed"
+    )
+
+# Chat display area
+if not st.session_state.messages:
+    st.markdown(f"""
+    <div class="welcome-container">
+        <div class="welcome-logo">C</div>
+        <div class="welcome-title">How can I help you today?</div>
+        <div class="welcome-subtitle">
+            {"Describe what you want to build, and I'll generate the code for you." if feature_mode == "Code Generation" else "Paste your code or ask questions, and I'll explain it in detail."}
+        </div>
+        <div class="feature-pills">
+            <div class="feature-pill">Generate a Python function</div>
+            <div class="feature-pill">Create a REST API</div>
+            <div class="feature-pill">Build a React component</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    # Display messages
+    for message in st.session_state.messages:
+        if message["role"] == "user":
+            with st.chat_message("user", avatar="👤"):
+                st.markdown(message["content"])
+        else:
+            with st.chat_message("assistant", avatar="✦"):
+                st.markdown(message["content"])
+
+st.divider()
+
+input_tab1, input_tab2, input_tab3 = st.tabs(["Text", "Image", "Voice"])
+
+user_input = None
+
+with input_tab1:
+    placeholder_text = "Describe the code you want to generate..." if feature_mode == "Code Generation" else "Paste code to explain or ask a question..."
+    
+    text_input = st.text_area(
+        "Message",
+        placeholder=placeholder_text,
+        height=100,
+        label_visibility="collapsed",
+        key="text_input"
+    )
+    
+    if st.button("Send", use_container_width=True, type="primary", key="send_text"):
+        if text_input.strip():
+            user_input = text_input
+
+with input_tab2:
+    uploaded_image = st.file_uploader(
+        "Upload code screenshot or diagram",
+        type=["png", "jpg", "jpeg", "gif", "webp"],
+        label_visibility="collapsed"
+    )
+    
+    if uploaded_image:
+        image = Image.open(uploaded_image)
+        st.image(image, use_container_width=True)
+        
+        image_description = st.text_input(
+            "Context",
+            placeholder="Describe what you want to know...",
+            label_visibility="collapsed"
+        )
+        
+        if st.button("Analyze", use_container_width=True, type="primary", key="send_image"):
+            if feature_mode == "Code Generation":
+                user_input = f"[Image uploaded] {image_description if image_description else 'Generate code based on this image'}"
+            else:
+                user_input = f"[Image uploaded] {image_description if image_description else 'Explain the code in this image'}"
+
+with input_tab3:
+    st.markdown("""
+    <p style="color: #8e8ea0; font-size: 0.875rem; margin-bottom: 1rem;">
+        Click to start recording, speak your prompt, then copy the result to the Text tab.
+    </p>
+    """, unsafe_allow_html=True)
+    
+    voice_html = """
+    <div style="padding: 1rem; background: #2f2f2f; border-radius: 12px; border: 1px solid #3d3d3d;">
+        <button id="voiceBtn" onclick="startVoice()" style="
+            background: #10a37f;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        ">
+            🎤 Start Recording
+        </button>
+        <p id="status" style="text-align: center; margin-top: 0.75rem; color: #8e8ea0; font-size: 0.85rem;"></p>
+        <textarea id="result" style="
+            width: 100%;
+            min-height: 60px;
+            margin-top: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            border: 1px solid #3d3d3d;
+            background: #212121;
+            color: #ececec;
+            font-size: 0.9rem;
+            display: none;
+            resize: none;
+        "></textarea>
+    </div>
+    
+    <script>
+        function startVoice() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                document.getElementById('status').innerText = 'Not supported in this browser';
+                return;
+            }
+            
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const recognition = new SR();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            
+            const btn = document.getElementById('voiceBtn');
+            const status = document.getElementById('status');
+            const result = document.getElementById('result');
+            
+            btn.innerHTML = '🔴 Recording...';
+            btn.style.background = '#ef4444';
+            status.innerText = 'Listening...';
+            
+            recognition.onresult = function(e) {
+                let t = '';
+                for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+                result.value = t;
+                result.style.display = 'block';
+            };
+            
+            recognition.onend = function() {
+                btn.innerHTML = '🎤 Start Recording';
+                btn.style.background = '#10a37f';
+                status.innerText = 'Done! Copy the text above.';
+            };
+            
+            recognition.onerror = function(e) {
+                btn.innerHTML = '🎤 Start Recording';
+                btn.style.background = '#10a37f';
+                status.innerText = 'Error: ' + e.error;
+            };
+            
+            recognition.start();
+        }
+    </script>
+    """
+    st.components.v1.html(voice_html, height=200)
+
+# Process input
+if user_input:
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input
+    })
+    
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(user_input)
+    
+    with st.chat_message("assistant", avatar="✦"):
+        response_placeholder = st.empty()
+        full_response = ""
+        
+        with st.spinner("Thinking..."):
+            try:
+                for chunk in generate_response(user_input, selected_model, feature_mode):
+                    full_response += chunk
+                    response_placeholder.markdown(full_response + "▌")
+                
+                response_placeholder.markdown(full_response)
+            except Exception as e:
+                full_response = f"Error: {str(e)}"
+                response_placeholder.error(full_response)
+    
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": full_response
+    })
+    
+    save_current_chat()
+    st.rerun()

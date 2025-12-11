@@ -390,6 +390,9 @@ def init_session_state() -> None:
     st.session_state.setdefault("current_bug", None)
     st.session_state.setdefault("auto_send_prompt", False)
     st.session_state.setdefault("pending_prompt", "")
+    st.session_state.setdefault("regenerate_index", None)
+    st.session_state.setdefault("tts_playing", False)
+    st.session_state.setdefault("tts_message_index", None)
 
     ensure_current_chat()
 
@@ -691,6 +694,48 @@ def inject_custom_css() -> None:
             cursor: pointer;
             font-size: 1.2rem;
         }
+        .message-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            opacity: 0.7;
+            transition: opacity 0.2s ease;
+        }
+        .message-actions:hover {
+            opacity: 1;
+        }
+        .action-btn {
+            background: linear-gradient(145deg, #2a2a2a 0%, #1f1f1f 100%);
+            border: 1px solid #3a3a3a;
+            border-radius: 20px;
+            padding: 0.35rem 0.75rem;
+            color: #a0a0a0;
+            font-size: 0.75rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            transition: all 0.2s ease;
+        }
+        .action-btn:hover {
+            background: linear-gradient(145deg, #3a3a3a 0%, #2f2f2f 100%);
+            border-color: #10a37f;
+            color: #10a37f;
+            transform: translateY(-1px);
+        }
+        .action-btn.playing {
+            background: linear-gradient(145deg, #10a37f 0%, #0d8c6d 100%);
+            border-color: #10a37f;
+            color: #fff;
+            animation: pulse-glow 1.5s infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 5px rgba(16, 163, 127, 0.3); }
+            50% { box-shadow: 0 0 15px rgba(16, 163, 127, 0.6); }
+        }
+        .action-btn .icon {
+            font-size: 0.85rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -707,6 +752,75 @@ def get_active_messages() -> List[Dict[str, Any]]:
     if st.session_state.is_temp_chat:
         return st.session_state.temp_messages
     return st.session_state.chats[st.session_state.current_chat_id]["messages"]
+
+
+def start_tts(text: str, message_index: int) -> None:
+    """Start text-to-speech for the given text using browser's Web Speech API."""
+    # Clean the text for TTS (remove markdown, code blocks, etc.)
+    clean_text = re.sub(r'```[\s\S]*?```', 'code block omitted', text)
+    clean_text = re.sub(r'`[^`]+`', '', clean_text)
+    clean_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean_text)
+    clean_text = re.sub(r'\*([^*]+)\*', r'\1', clean_text)
+    clean_text = re.sub(r'#{1,6}\s*', '', clean_text)
+    clean_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', clean_text)
+    clean_text = clean_text.strip()
+    
+    st.session_state.tts_playing = True
+    st.session_state.tts_message_index = message_index
+    st.session_state.tts_text = clean_text
+    
+    # Use JavaScript Web Speech API for TTS
+    js_code = f'''
+    <script>
+        const utterance = new SpeechSynthesisUtterance(`{clean_text.replace('`', '').replace('"', '\\"').replace("'", "\\'")[:2000]}`);
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+        
+        // Try to use a good voice
+        const voices = speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Microsoft'));
+        if (preferredVoice) utterance.voice = preferredVoice;
+        
+        speechSynthesis.speak(utterance);
+    </script>
+    '''
+    st.components.v1.html(js_code, height=0)
+
+
+def stop_tts() -> None:
+    """Stop text-to-speech playback."""
+    st.session_state.tts_playing = False
+    st.session_state.tts_message_index = None
+    
+    # Use JavaScript to stop speech
+    js_code = '''
+    <script>
+        speechSynthesis.cancel();
+    </script>
+    '''
+    st.components.v1.html(js_code, height=0)
+
+
+def regenerate_response(messages: List[Dict[str, Any]], index: int, mode: str, system_prompt: str, model: str) -> None:
+    """Regenerate the assistant response at the given index."""
+    if index <= 0 or index >= len(messages):
+        return
+    
+    # Find the user message before this assistant message
+    user_msg_index = index - 1
+    if messages[user_msg_index].get("role") != "user":
+        return
+    
+    user_prompt = messages[user_msg_index].get("content", "")
+    user_image = messages[user_msg_index].get("image")
+    
+    # Remove the old assistant message
+    messages.pop(index)
+    
+    # Generate new response (this will be handled in main loop)
+    st.session_state.regenerate_prompt = user_prompt
+    st.session_state.regenerate_image = user_image
 
 
 def image_to_base64(image: Image.Image) -> str:
@@ -807,7 +921,7 @@ def parse_and_render_segments(content: str) -> None:
 
 def render_chat_history(messages: List[Dict[str, Any]]) -> None:
     """Loop through session messages and display them with avatars and bubbles."""
-    for message in messages:
+    for idx, message in enumerate(messages):
         role = message.get("role", "assistant")
         avatar = "👤" if role == "user" else "✨"
         
@@ -819,6 +933,86 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
             st.markdown(f"<div class='chat-bubble'>", unsafe_allow_html=True)
             parse_and_render_segments(message.get("content", ""))
             st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Add action buttons for assistant messages
+            if role == "assistant" and message.get("content"):
+                btn_col1, btn_col2, btn_col3, _ = st.columns([1, 1, 1, 5])
+                
+                with btn_col1:
+                    is_playing = st.session_state.get("tts_playing") and st.session_state.get("tts_message_index") == idx
+                    if st.button(
+                        "🔊 Read" if not is_playing else "⏹️ Stop",
+                        key=f"tts_btn_{idx}",
+                        help="Read this response aloud",
+                        use_container_width=True
+                    ):
+                        if is_playing:
+                            stop_tts()
+                        else:
+                            start_tts(message.get("content", ""), idx)
+                
+                with btn_col2:
+                    if st.button(
+                        "🔄 Redo",
+                        key=f"regen_btn_{idx}",
+                        help="Regenerate this response",
+                        use_container_width=True
+                    ):
+                        st.session_state.regenerate_index = idx
+                        st.rerun()
+                
+                with btn_col3:
+                    if st.button(
+                        "📋 Copy",
+                        key=f"copy_btn_{idx}",
+                        help="Copy to clipboard",
+                        use_container_width=True
+                    ):
+                        st.session_state[f"show_copy_{idx}"] = True
+                        st.rerun()
+                
+                # Show copy modal with text area for easy copying
+                if st.session_state.get(f"show_copy_{idx}", False):
+                    with st.expander("📋 Copy Text", expanded=True):
+                        content_to_copy = message.get("content", "")
+                        st.text_area(
+                            "Select all (Ctrl+A) and copy (Ctrl+C):",
+                            value=content_to_copy,
+                            height=200,
+                            key=f"copy_area_{idx}",
+                            label_visibility="visible"
+                        )
+                        
+                        col_close, col_download = st.columns(2)
+                        with col_close:
+                            if st.button("✕ Close", key=f"close_copy_{idx}", use_container_width=True):
+                                st.session_state[f"show_copy_{idx}"] = False
+                                st.rerun()
+                        with col_download:
+                            st.download_button(
+                                "💾 Download",
+                                data=content_to_copy,
+                                file_name="response.txt",
+                                mime="text/plain",
+                                key=f"download_{idx}",
+                                use_container_width=True
+                            )
+                        
+                        # JavaScript to auto-select text
+                        st.components.v1.html(
+                            f"""
+                            <script>
+                                setTimeout(function() {{
+                                    const textarea = window.parent.document.querySelector('textarea[aria-label="Select all (Ctrl+A) and copy (Ctrl+C):"]');
+                                    if (textarea) {{
+                                        textarea.select();
+                                        textarea.focus();
+                                    }}
+                                }}, 100);
+                            </script>
+                            """,
+                            height=0
+                        )
 
 
 def set_empty_state_action(prefill_text: str, *, show_image_upload: bool = False) -> None:
@@ -2001,6 +2195,45 @@ def main() -> None:
             image=st.session_state.uploaded_image
         )
         st.rerun()
+    
+    # Handle regenerate response
+    if st.session_state.get("regenerate_index") is not None:
+        regen_index = st.session_state.regenerate_index
+        st.session_state.regenerate_index = None
+        
+        messages = get_active_messages()
+        if regen_index > 0 and regen_index < len(messages):
+            # Get the user message before this assistant response
+            user_msg_index = regen_index - 1
+            if messages[user_msg_index].get("role") == "user":
+                user_prompt_regen = messages[user_msg_index].get("content", "")
+                user_image_regen = messages[user_msg_index].get("image")
+                
+                # Remove the old assistant message
+                messages.pop(regen_index)
+                
+                # Display existing messages
+                render_chat_history(messages)
+                
+                # Generate new response with streaming
+                with st.chat_message("assistant", avatar="✨"):
+                    message_placeholder = st.empty()
+                    full_response = ""
+                    
+                    for chunk in send_to_backend(
+                        messages,
+                        mode=mode,
+                        system_prompt=system_prompt.strip(),
+                        model=model,
+                        image=user_image_regen,
+                    ):
+                        full_response += chunk
+                        message_placeholder.markdown(full_response + "▌")
+                    
+                    message_placeholder.markdown(full_response)
+                
+                messages.append({"role": "assistant", "content": full_response})
+                st.rerun()
     
     if user_prompt:
         handle_user_prompt(
