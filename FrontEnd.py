@@ -162,56 +162,133 @@ def inject_custom_css() -> None:
         }
         .hero-card {
             text-align: center;
-            margin: 8rem auto 3rem auto;
-            padding: 2rem;
-            max-width: 600px;
+            margin: 4rem auto 2rem auto;
+            padding: 2.5rem;
+            max-width: 700px;
+            position: relative;
+        }
+        .hero-glow {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(16, 163, 127, 0.15) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            animation: glow-pulse 4s ease-in-out infinite;
+        }
+        @keyframes glow-pulse {
+            0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
         }
         .hero-logo {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #10a37f, #1a7f64);
+            width: 80px;
+            height: 80px;
+            border-radius: 24px;
+            background: linear-gradient(135deg, #10a37f 0%, #0d8c6d 50%, #076d54 100%);
             display: flex;
             align-items: center;
             justify-content: center;
             margin: 0 auto 1.5rem auto;
-            font-size: 1.8rem;
+            font-size: 2.2rem;
+            box-shadow: 0 20px 40px rgba(16, 163, 127, 0.3), 0 0 60px rgba(16, 163, 127, 0.1);
+            animation: float 3s ease-in-out infinite;
+            position: relative;
+            z-index: 1;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
         }
         .hero-title {
-            font-size: 1.8rem;
-            font-weight: 600;
-            color: #ececec;
-            margin-bottom: 0.5rem;
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0a0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.75rem;
+            letter-spacing: -0.02em;
         }
         .hero-subtitle { 
             color: #8e8e8e; 
-            font-size: 1rem;
+            font-size: 1.1rem;
+            margin-bottom: 2.5rem;
+            line-height: 1.6;
+        }
+        .hero-badges {
+            display: flex;
+            justify-content: center;
+            gap: 0.75rem;
             margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+        .hero-badge {
+            background: rgba(16, 163, 127, 0.1);
+            border: 1px solid rgba(16, 163, 127, 0.3);
+            border-radius: 20px;
+            padding: 0.4rem 0.9rem;
+            font-size: 0.75rem;
+            color: #10a37f;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
         }
         .suggestion-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 0.75rem;
-            max-width: 500px;
+            gap: 1rem;
+            max-width: 600px;
             margin: 0 auto;
         }
         .suggestion-card {
-            background: #2f2f2f;
-            border: 1px solid #424242;
-            border-radius: 12px;
-            padding: 1rem;
+            background: linear-gradient(145deg, #2a2a2a 0%, #1f1f1f 100%);
+            border: 1px solid #3a3a3a;
+            border-radius: 16px;
+            padding: 1.25rem;
             text-align: left;
             font-size: 0.9rem;
             color: #ececec;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .suggestion-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(16, 163, 127, 0.1) 0%, transparent 100%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
         .suggestion-card:hover {
-            background: #424242;
+            border-color: #10a37f;
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(16, 163, 127, 0.2);
+        }
+        .suggestion-card:hover::before {
+            opacity: 1;
         }
         .suggestion-icon {
-            font-size: 1.2rem;
-            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+            margin-bottom: 0.75rem;
+            display: block;
+        }
+        .suggestion-title {
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+            color: #fff;
+        }
+        .suggestion-desc {
+            font-size: 0.8rem;
+            color: #8e8e8e;
+            line-height: 1.4;
         }
         div[data-testid="stChatInput"] > div {
             border: 1px solid #424242;
@@ -457,31 +534,113 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
             st.markdown("</div>", unsafe_allow_html=True)
 
 
+def set_empty_state_action(prefill_text: str, *, show_image_upload: bool = False) -> None:
+    """Apply suggestion card action and optionally open the image uploader."""
+    st.session_state.prefill_prompt = prefill_text
+    if show_image_upload:
+        st.session_state.show_image_upload = True
+        st.session_state.show_voice_input = False
+
+
 def render_empty_state(display_name: str) -> None:
-    """ChatGPT-style welcome screen with suggestions."""
+    """Stunning ChatGPT-style welcome screen with animated suggestions."""
+    
+    # Get current model for display
+    current_model = st.session_state.get("model_select", MODEL_OPTIONS[0])
+    current_mode = st.session_state.get("mode_select", CHAT_MODES[0])
+    
     st.markdown(
         f"""
         <div class="hero-card">
+            <div class="hero-glow"></div>
             <div class="hero-logo">✨</div>
-            <div class="hero-title">What can I help with?</div>
-            <div class="hero-subtitle">Ask me anything, upload an image, or use your voice.</div>
+            <div class="hero-title">Hi {display_name}, how can I help?</div>
+            <div class="hero-subtitle">
+                I'm your AI coding assistant. Ask me anything, upload an image for analysis,<br>
+                or use voice input to get started.
+            </div>
+            <div class="hero-badges">
+                <span class="hero-badge">🤖 {current_model}</span>
+                <span class="hero-badge">💬 {current_mode}</span>
+                <span class="hero-badge">⚡ Streaming</span>
+                <span class="hero-badge">🖼️ Vision</span>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
     
-    # Suggestion cards
+    # Stunning suggestion cards
+    st.markdown("<br>", unsafe_allow_html=True)
+    
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("💡 Explain a concept", use_container_width=True, key="sug1"):
-            st.session_state.prefill_prompt = "Explain how neural networks work in simple terms"
-        if st.button("🔧 Debug my code", use_container_width=True, key="sug3"):
-            st.session_state.prefill_prompt = "Help me debug this code: "
+        # Card 1: Explain
+        st.markdown("""
+            <div class="suggestion-card" style="pointer-events: none;">
+                <span class="suggestion-icon">💡</span>
+                <div class="suggestion-title">Explain a concept</div>
+                <div class="suggestion-desc">Break down complex topics into simple terms</div>
+            </div>
+        """, unsafe_allow_html=True)
+        st.button(
+            "💡 Explain a concept",
+            use_container_width=True,
+            key="sug1",
+            on_click=set_empty_state_action,
+            args=("Explain how neural networks work in simple terms",),
+        )
+        
+        # Card 3: Debug
+        st.markdown("""
+            <div class="suggestion-card" style="pointer-events: none;">
+                <span class="suggestion-icon">🔧</span>
+                <div class="suggestion-title">Debug my code</div>
+                <div class="suggestion-desc">Find and fix bugs in your code</div>
+            </div>
+        """, unsafe_allow_html=True)
+        st.button(
+            "🔧 Debug my code",
+            use_container_width=True,
+            key="sug3",
+            on_click=set_empty_state_action,
+            args=("Help me debug this code: ",),
+        )
+            
     with col2:
-        if st.button("✍️ Write something", use_container_width=True, key="sug2"):
-            st.session_state.prefill_prompt = "Write a professional email about "
-        if st.button("🖼️ Analyze an image", use_container_width=True, key="sug4"):
-            st.session_state.show_image_upload = True
+        # Card 2: Write
+        st.markdown("""
+            <div class="suggestion-card" style="pointer-events: none;">
+                <span class="suggestion-icon">✍️</span>
+                <div class="suggestion-title">Write something</div>
+                <div class="suggestion-desc">Generate emails, docs, or creative content</div>
+            </div>
+        """, unsafe_allow_html=True)
+        st.button(
+            "✍️ Write something",
+            use_container_width=True,
+            key="sug2",
+            on_click=set_empty_state_action,
+            args=("Write a professional email about ",),
+        )
+        
+        # Card 4: Image
+        st.markdown("""
+            <div class="suggestion-card" style="pointer-events: none;">
+                <span class="suggestion-icon">🖼️</span>
+                <div class="suggestion-title">Analyze an image</div>
+                <div class="suggestion-desc">Upload and get insights from images</div>
+            </div>
+        """, unsafe_allow_html=True)
+        st.button(
+            "🖼️ Analyze an image",
+            use_container_width=True,
+            key="sug4",
+            on_click=set_empty_state_action,
+            args=("",),
+            kwargs={"show_image_upload": True},
+        )
+    
 
 
 def clear_conversation() -> None:
@@ -1120,9 +1279,196 @@ def main() -> None:
     else:
         render_empty_state(st.session_state.display_name)
 
-    # Input toolbar (image/voice)
+    # Input toolbar and chat input in linear layout
     st.markdown("---")
-    attached_image, voice_text = render_input_toolbar()
+    
+    # Create linear input layout: text input (left) -> voice (middle) -> image (right)
+    input_col1, input_col2, input_col3 = st.columns([8, 0.8, 0.8])
+    
+    with input_col1:
+        # Pre-fill prompt if set
+        default_prompt = st.session_state.get("prefill_prompt", "")
+        if default_prompt:
+            st.session_state.prefill_prompt = ""
+        
+        # Use voice text as default if available (for manual input)
+        voice_text = st.session_state.get("voice_text", "")
+        if voice_text and st.session_state.voice_text and not st.session_state.get("auto_send_voice", False):
+            default_prompt = voice_text
+            st.session_state.voice_text = ""
+        
+        # Chat input
+        attached_image = st.session_state.uploaded_image
+        placeholder = "Message Code Gen AI..."
+        if attached_image:
+            placeholder = "Ask about this image..."
+        
+        user_prompt = st.chat_input(placeholder)
+    
+    with input_col2:
+        if st.button("🎤", key="voice_btn_main", help="Voice input", use_container_width=True):
+            st.session_state.show_voice_input = not st.session_state.show_voice_input
+            st.session_state.show_image_upload = False
+            st.rerun()
+    
+    with input_col3:
+        if st.button("📷", key="img_btn_main", help="Upload an image", use_container_width=True):
+            st.session_state.show_image_upload = not st.session_state.show_image_upload
+            st.session_state.show_voice_input = False
+            st.rerun()
+    
+    # Show image/voice upload sections below the input
+    if st.session_state.show_image_upload:
+        with st.container():
+            uploaded_file = st.file_uploader(
+                "Upload an image",
+                type=["png", "jpg", "jpeg", "gif", "webp"],
+                key="image_uploader",
+                label_visibility="collapsed"
+            )
+            if uploaded_file:
+                uploaded_image = Image.open(uploaded_file)
+                st.session_state.uploaded_image = uploaded_image
+                st.image(uploaded_image, width=200, caption="Ready to send")
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("✓ Keep", use_container_width=True):
+                        st.session_state.show_image_upload = False
+                        st.rerun()
+                with col_b:
+                    if st.button("✕ Remove", use_container_width=True):
+                        st.session_state.uploaded_image = None
+                        st.rerun()
+    
+    if st.session_state.show_voice_input:
+        with st.container():
+            st.info("🎤 Record your voice message (auto-transcription enabled)")
+            
+            audio_value = st.audio_input(
+                "Record your message",
+                key="audio_recorder",
+                label_visibility="collapsed"
+            )
+            
+            if audio_value:
+                st.audio(audio_value)
+                
+                # Auto-transcribe when audio is recorded
+                if audio_value and "last_audio_hash" not in st.session_state or st.session_state.get("last_audio_hash") != hash(audio_value.getvalue()):
+                    st.session_state.last_audio_hash = hash(audio_value.getvalue())
+                    
+                    with st.spinner("🎙️ Auto-transcribing..."):
+                        audio_bytes = audio_value.read()
+                        
+                        if SPEECH_RECOGNITION_AVAILABLE:
+                            tmp_path = None
+                            try:
+                                import wave
+                                import tempfile
+                                import os
+                                import time
+                                
+                                # Save to temp file for speech recognition
+                                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                    tmp.write(audio_bytes)
+                                    tmp_path = tmp.name
+                                
+                                # Ensure file is closed before using it
+                                time.sleep(0.1)
+                                
+                                recognizer = sr.Recognizer()
+                                with sr.AudioFile(tmp_path) as source:
+                                    audio_data = recognizer.record(source)
+                                
+                                # Ensure AudioFile is closed before cleanup
+                                voice_text = recognizer.recognize_google(audio_data)
+                                st.session_state.voice_text = voice_text
+                                st.session_state.auto_send_voice = True
+                                
+                                st.success(f"✅ Transcribed: {voice_text}")
+                                st.info("💬 Sending to AI automatically...")
+                                st.rerun()
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Transcription error: {e}")
+                                st.session_state.voice_text = ""
+                            finally:
+                                # Clean up temp file with retry
+                                if tmp_path and os.path.exists(tmp_path):
+                                    for i in range(3):  # Try 3 times
+                                        try:
+                                            os.unlink(tmp_path)
+                                            break
+                                        except PermissionError:
+                                            time.sleep(0.1)  # Wait a bit and retry
+                                        except Exception:
+                                            break  # Give up on other errors
+                        else:
+                            st.warning("⚠️ Install `SpeechRecognition` for auto-transcription: `pip install SpeechRecognition`")
+                
+                # Manual transcribe button as backup
+                col_manual, col_clear = st.columns(2)
+                with col_manual:
+                    if st.button("🔄 Re-transcribe", use_container_width=True):
+                        with st.spinner("🎙️ Transcribing..."):
+                            audio_bytes = audio_value.read()
+                            
+                            if SPEECH_RECOGNITION_AVAILABLE:
+                                tmp_path = None
+                                try:
+                                    import wave
+                                    import tempfile
+                                    import os
+                                    import time
+                                    
+                                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                        tmp.write(audio_bytes)
+                                        tmp_path = tmp.name
+                                    
+                                    # Ensure file is closed before using it
+                                    time.sleep(0.1)
+                                    
+                                    recognizer = sr.Recognizer()
+                                    with sr.AudioFile(tmp_path) as source:
+                                        audio_data = recognizer.record(source)
+                                    
+                                    # Ensure AudioFile is closed before cleanup
+                                    voice_text = recognizer.recognize_google(audio_data)
+                                    st.session_state.voice_text = voice_text
+                                    
+                                    st.success(f"✅ Re-transcribed: {voice_text}")
+                                except Exception as e:
+                                    st.error(f"❌ Transcription error: {e}")
+                                finally:
+                                    # Clean up temp file with retry
+                                    if tmp_path and os.path.exists(tmp_path):
+                                        for i in range(3):  # Try 3 times
+                                            try:
+                                                os.unlink(tmp_path)
+                                                break
+                                            except PermissionError:
+                                                time.sleep(0.1)  # Wait a bit and retry
+                                            except Exception:
+                                                break  # Give up on other errors
+                
+                with col_clear:
+                    if st.button("🗑️ Clear", use_container_width=True):
+                        st.session_state.voice_text = ""
+                        if "last_audio_hash" in st.session_state:
+                            del st.session_state.last_audio_hash
+                        st.rerun()
+    
+    # Show pending image preview
+    if st.session_state.uploaded_image and not st.session_state.show_image_upload:
+        with st.container():
+            col_img, col_remove = st.columns([4, 1])
+            with col_img:
+                st.image(st.session_state.uploaded_image, width=80)
+            with col_remove:
+                if st.button("✕", key="remove_preview"):
+                    st.session_state.uploaded_image = None
+                    st.rerun()
     
     # Handle auto-send voice input
     if st.session_state.get("auto_send_voice", False) and st.session_state.get("voice_text", ""):
@@ -1136,26 +1482,9 @@ def main() -> None:
             mode,
             system_prompt.strip(),
             model,
-            image=attached_image
+            image=st.session_state.uploaded_image
         )
         st.rerun()
-    
-    # Pre-fill prompt if set
-    default_prompt = st.session_state.get("prefill_prompt", "")
-    if default_prompt:
-        st.session_state.prefill_prompt = ""
-    
-    # Use voice text as default if available (for manual input)
-    if voice_text and st.session_state.voice_text and not st.session_state.get("auto_send_voice", False):
-        default_prompt = voice_text
-        st.session_state.voice_text = ""
-    
-    # Chat input
-    placeholder = "Message Code Gen AI..."
-    if attached_image:
-        placeholder = "Ask about this image..."
-    
-    user_prompt = st.chat_input(placeholder)
     
     if user_prompt:
         handle_user_prompt(
@@ -1163,11 +1492,12 @@ def main() -> None:
             mode, 
             system_prompt.strip(), 
             model,
-            image=attached_image
+            image=st.session_state.uploaded_image
         )
         st.session_state.show_image_upload = False
         st.session_state.show_voice_input = False
         st.rerun()
+    st.markdown('---')
 
 
 if __name__ == "__main__":
