@@ -536,6 +536,18 @@ def send_to_backend(
     if not user_prompt:
         yield "Hi there! Send a message or upload an image and I'll respond."
         return
+    
+    # Apply mode-specific instructions to the prompt
+    mode_instructions = ""
+    if mode == "Generate Code":
+        mode_instructions = "You are a code generation assistant. Generate clean, efficient, and well-commented code based on the user's request. Always include code examples in your response.\n\n"
+    elif mode == "Explain Code":
+        mode_instructions = "You are a code explanation assistant. Provide clear, detailed explanations of code, breaking down how it works step by step. Explain concepts, logic flow, and best practices.\n\n"
+    else:  # Chat mode
+        mode_instructions = f"{system_prompt}\n\n"
+    
+    # Prepend mode instructions to user prompt
+    full_prompt = mode_instructions + user_prompt
 
     # --------------------
     # Groq / OpenAI-compatible (gpt-oss-120b)
@@ -560,7 +572,7 @@ def send_to_backend(
             )
             
             response = client.responses.create(
-                input=user_prompt,
+                input=full_prompt,
                 model="openai/gpt-oss-120b",
                 stream=True
             )
@@ -584,7 +596,7 @@ def send_to_backend(
     # Ollama Models (llama3, deepseek-r1)
     # --------------------
     if model in ["llama3", "deepseek-r1"]:
-        yield from stream_generate(model, user_prompt)
+        yield from stream_generate(model, full_prompt)
         return
 
     # --------------------
