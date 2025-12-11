@@ -19,6 +19,7 @@ import base64
 import io
 import json
 import re
+import random
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
@@ -46,6 +47,281 @@ CHAT_MODES = ["Chat", "Generate Code", "Explain Code"]
 MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1", "qwen3-vl:2b"]
 DEFAULT_SYSTEM_PROMPT = "You are ChatGPT, a large language model trained by OpenAI. You are helpful, creative, clever, and very friendly."
 CODE_BLOCK_PATTERN = re.compile(r"```(?P<lang>[\w+\-]*)\n(?P<code>.*?)```", re.DOTALL)
+
+# Random Concept Explainer Data
+CONCEPTS_BY_DIFFICULTY = {
+    "Beginner": [
+        {"category": "Data Structures", "topic": "Arrays vs Linked Lists"},
+        {"category": "Algorithms", "topic": "Linear Search"},
+        {"category": "Web Dev", "topic": "What is HTTP?"},
+        {"category": "CS Basics", "topic": "What is a Variable?"},
+        {"category": "AI", "topic": "What is Machine Learning?"},
+        {"category": "Data Structures", "topic": "Stack and Queue basics"},
+        {"category": "Algorithms", "topic": "Bubble Sort"},
+        {"category": "Web Dev", "topic": "HTML vs CSS vs JavaScript"},
+        {"category": "CS Basics", "topic": "What is an Operating System?"},
+        {"category": "AI", "topic": "Supervised vs Unsupervised Learning"},
+    ],
+    "Intermediate": [
+        {"category": "Data Structures", "topic": "Hashmap collision resolution"},
+        {"category": "Algorithms", "topic": "Two Pointers technique"},
+        {"category": "Web Dev", "topic": "REST vs GraphQL"},
+        {"category": "CS Basics", "topic": "Process vs Thread"},
+        {"category": "AI", "topic": "Gradient Descent optimization"},
+        {"category": "Data Structures", "topic": "Binary Search Trees"},
+        {"category": "Algorithms", "topic": "Merge Sort vs Quick Sort"},
+        {"category": "Web Dev", "topic": "CORS and how it works"},
+        {"category": "CS Basics", "topic": "Virtual Memory"},
+        {"category": "AI", "topic": "Overfitting and Regularization"},
+    ],
+    "Advanced": [
+        {"category": "Data Structures", "topic": "Red-Black Trees balancing"},
+        {"category": "Algorithms", "topic": "Dynamic Programming - State compression"},
+        {"category": "Web Dev", "topic": "Microservices architecture patterns"},
+        {"category": "CS Basics", "topic": "Deadlock prevention algorithms"},
+        {"category": "AI", "topic": "Self-attention in Transformers"},
+        {"category": "Data Structures", "topic": "B+ Trees for databases"},
+        {"category": "Algorithms", "topic": "A* pathfinding algorithm"},
+        {"category": "Web Dev", "topic": "Event-driven architecture"},
+        {"category": "CS Basics", "topic": "Memory management and Garbage Collection"},
+        {"category": "AI", "topic": "Reinforcement Learning - Q-Learning"},
+    ]
+}
+
+# Random Writing Tasks Data
+WRITING_TASKS_BY_TONE = {
+    "Formal": [
+        {"type": "Email", "prompt": "Write a professional apology email for missing a meeting"},
+        {"type": "Email", "prompt": "Write a formal request for a deadline extension"},
+        {"type": "Documentation", "prompt": "Write API documentation for a user authentication endpoint"},
+        {"type": "Resume", "prompt": "Write a resume bullet point for leading a software migration project"},
+        {"type": "Email", "prompt": "Write a professional introduction email to a new client"},
+        {"type": "Report", "prompt": "Write an executive summary for a quarterly performance report"},
+        {"type": "Proposal", "prompt": "Write a project proposal introduction for a new mobile app"},
+    ],
+    "Friendly": [
+        {"type": "Email", "prompt": "Write a friendly follow-up email after a job interview"},
+        {"type": "Social Media", "prompt": "Write an engaging LinkedIn post about starting a new job"},
+        {"type": "Message", "prompt": "Write a warm welcome message for new team members"},
+        {"type": "Blog", "prompt": "Write a casual blog intro about learning to code"},
+        {"type": "Social Media", "prompt": "Write an Instagram caption for a team building event"},
+        {"type": "Email", "prompt": "Write a friendly reminder email for an upcoming team lunch"},
+        {"type": "Newsletter", "prompt": "Write a friendly company newsletter opening paragraph"},
+    ],
+    "Humorous": [
+        {"type": "Social Media", "prompt": "Write a funny tweet about debugging code at 3 AM"},
+        {"type": "Product", "prompt": "Write a humorous product description for a rubber duck debugger"},
+        {"type": "Email", "prompt": "Write a playfully sarcastic out-of-office auto-reply"},
+        {"type": "Story", "prompt": "Write a short funny story about a programmer's first day at work"},
+        {"type": "Social Media", "prompt": "Write a witty LinkedIn post about surviving Monday meetings"},
+        {"type": "Caption", "prompt": "Write a humorous error message for a 404 page"},
+        {"type": "Bio", "prompt": "Write a funny developer bio for a GitHub profile"},
+    ]
+}
+
+# Random Bug Generator Data
+BUGGY_CODE_SNIPPETS = [
+    {
+        "language": "python",
+        "title": "Off-by-one error in loop",
+        "buggy_code": '''def sum_first_n(arr, n):
+    """Sum the first n elements of arr"""
+    total = 0
+    for i in range(1, n + 1):  # Bug here!
+        total += arr[i]
+    return total
+
+# Example: sum_first_n([1, 2, 3, 4, 5], 3) should return 6''',
+        "fixed_code": '''def sum_first_n(arr, n):
+    """Sum the first n elements of arr"""
+    total = 0
+    for i in range(n):  # Fixed: start from 0
+        total += arr[i]
+    return total''',
+        "explanation": "The loop started at index 1 instead of 0, causing it to skip the first element and potentially access an out-of-bounds index.",
+        "prevention": "Always remember Python uses 0-based indexing. Use range(n) for first n elements."
+    },
+    {
+        "language": "python",
+        "title": "Mutable default argument",
+        "buggy_code": '''def add_item(item, items=[]):  # Bug here!
+    items.append(item)
+    return items
+
+# Try calling:
+# print(add_item("a"))  # ['a']
+# print(add_item("b"))  # Expect ['b'], but get ['a', 'b']!''',
+        "fixed_code": '''def add_item(item, items=None):
+    if items is None:
+        items = []
+    items.append(item)
+    return items''',
+        "explanation": "Mutable default arguments (like lists) are created once at function definition, not each call. All calls share the same list!",
+        "prevention": "Never use mutable objects (lists, dicts) as default arguments. Use None and create inside the function."
+    },
+    {
+        "language": "javascript",
+        "title": "Async/Await missing",
+        "buggy_code": '''async function fetchUserData(userId) {
+    const response = fetch(`/api/users/${userId}`);  // Bug here!
+    const data = response.json();
+    return data;
+}
+
+// Returns a Promise, not the actual data!''',
+        "fixed_code": '''async function fetchUserData(userId) {
+    const response = await fetch(`/api/users/${userId}`);
+    const data = await response.json();
+    return data;
+}''',
+        "explanation": "Missing 'await' keywords cause the function to return Promises instead of waiting for the actual values.",
+        "prevention": "Always use 'await' when calling async functions or Promise-returning methods like fetch()."
+    },
+    {
+        "language": "javascript",
+        "title": "Variable hoisting issue",
+        "buggy_code": '''function printNumbers() {
+    for (var i = 0; i < 3; i++) {
+        setTimeout(function() {
+            console.log(i);  // Bug: prints 3, 3, 3
+        }, 100);
+    }
+}
+// Expected: 0, 1, 2  Actual: 3, 3, 3''',
+        "fixed_code": '''function printNumbers() {
+    for (let i = 0; i < 3; i++) {
+        setTimeout(function() {
+            console.log(i);  // Fixed: prints 0, 1, 2
+        }, 100);
+    }
+}''',
+        "explanation": "'var' is function-scoped, so all callbacks share the same 'i'. By the time they run, the loop has finished and i=3.",
+        "prevention": "Use 'let' instead of 'var' for block-scoped variables, especially in loops with closures."
+    },
+    {
+        "language": "python",
+        "title": "Infinite loop",
+        "buggy_code": '''def find_target(arr, target):
+    left, right = 0, len(arr) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid  # Bug here!
+        else:
+            right = mid  # Bug here!
+    return -1''',
+        "fixed_code": '''def find_target(arr, target):
+    left, right = 0, len(arr) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1  # Fixed
+        else:
+            right = mid - 1  # Fixed
+    return -1''',
+        "explanation": "Without +1/-1, the search space never shrinks when mid equals left or right, causing an infinite loop.",
+        "prevention": "In binary search, always shrink the search space by excluding mid: left = mid + 1 or right = mid - 1."
+    },
+    {
+        "language": "java",
+        "title": "Null pointer exception",
+        "buggy_code": '''public String getUserName(User user) {
+    return user.getName().toUpperCase();  // Bug: no null check!
+}
+
+// Crashes if user is null or user.getName() returns null''',
+        "fixed_code": '''public String getUserName(User user) {
+    if (user == null || user.getName() == null) {
+        return "Unknown";
+    }
+    return user.getName().toUpperCase();
+}''',
+        "explanation": "Calling methods on null references throws NullPointerException. Both the user object and getName() result could be null.",
+        "prevention": "Always validate inputs and check for null before calling methods. Consider using Optional in Java 8+."
+    },
+    {
+        "language": "python",
+        "title": "String comparison bug",
+        "buggy_code": '''def check_password(input_pwd, stored_pwd):
+    if input_pwd is stored_pwd:  # Bug here!
+        return True
+    return False
+
+# May fail even with matching passwords!''',
+        "fixed_code": '''def check_password(input_pwd, stored_pwd):
+    if input_pwd == stored_pwd:  # Fixed: use == for value comparison
+        return True
+    return False''',
+        "explanation": "'is' checks object identity (same memory location), '==' checks value equality. Different string objects with same content fail 'is' check.",
+        "prevention": "Use '==' for comparing values, 'is' only for None checks or intentional identity comparison."
+    },
+    {
+        "language": "javascript",
+        "title": "Type coercion bug",
+        "buggy_code": '''function isAdult(age) {
+    if (age == "18") {  // Bug: loose equality!
+        return true;
+    }
+    return age > 18;
+}
+
+// isAdult("18") returns true (correct by accident)
+// isAdult("19") returns false! (string > number comparison)''',
+        "fixed_code": '''function isAdult(age) {
+    const numAge = Number(age);
+    if (numAge >= 18) {
+        return true;
+    }
+    return false;
+}''',
+        "explanation": "Using == allows type coercion which can cause unexpected behavior. String/number comparisons with > are unpredictable.",
+        "prevention": "Always use === for comparisons and explicitly convert types. Consider TypeScript for type safety."
+    },
+    {
+        "language": "python",
+        "title": "Wrong variable scope",
+        "buggy_code": '''total = 0
+
+def add_to_total(value):
+    total = total + value  # Bug: UnboundLocalError!
+    return total
+
+add_to_total(5)''',
+        "fixed_code": '''total = 0
+
+def add_to_total(value):
+    global total  # Fixed: declare global
+    total = total + value
+    return total
+
+# Or better - avoid global state:
+def add_to_total(current_total, value):
+    return current_total + value''',
+        "explanation": "Assignment inside a function creates a local variable. Python sees 'total = ...' and treats 'total' as local, but it's read before assignment.",
+        "prevention": "Avoid modifying global variables. Pass values as parameters and return results. Use 'global' keyword only when necessary."
+    },
+    {
+        "language": "java",
+        "title": "Array index out of bounds",
+        "buggy_code": '''public int getLastElement(int[] arr) {
+    return arr[arr.length];  // Bug: off by one!
+}
+
+// Array of length 5 has indices 0-4, not 0-5''',
+        "fixed_code": '''public int getLastElement(int[] arr) {
+    if (arr == null || arr.length == 0) {
+        throw new IllegalArgumentException("Array is empty");
+    }
+    return arr[arr.length - 1];  // Fixed: length - 1
+}''',
+        "explanation": "Array indices go from 0 to length-1. Accessing arr[length] is always out of bounds.",
+        "prevention": "Remember: last valid index = length - 1. Add bounds checking and handle empty arrays."
+    }
+]
 
 
 def get_secret_or_env(key: str) -> Optional[str]:
@@ -103,6 +379,17 @@ def init_session_state() -> None:
     st.session_state.setdefault("show_rename_input", False)
     st.session_state.setdefault("rename_chat_title", "")
     st.session_state.setdefault("auto_send_voice", False)
+    # Feature toggles for enhanced buttons
+    st.session_state.setdefault("concept_difficulty", "Intermediate")
+    st.session_state.setdefault("writing_tone", "Formal")
+    st.session_state.setdefault("show_concept_explainer", False)
+    st.session_state.setdefault("show_writing_generator", False)
+    st.session_state.setdefault("show_bug_debugger", False)
+    st.session_state.setdefault("current_concept", None)
+    st.session_state.setdefault("current_writing_task", None)
+    st.session_state.setdefault("current_bug", None)
+    st.session_state.setdefault("auto_send_prompt", False)
+    st.session_state.setdefault("pending_prompt", "")
 
     ensure_current_chat()
 
@@ -542,8 +829,80 @@ def set_empty_state_action(prefill_text: str, *, show_image_upload: bool = False
         st.session_state.show_voice_input = False
 
 
+def trigger_concept_explainer() -> None:
+    """Trigger the random concept explainer feature."""
+    st.session_state.show_concept_explainer = True
+    st.session_state.show_writing_generator = False
+    st.session_state.show_bug_debugger = False
+    # Pick a random concept based on difficulty
+    difficulty = st.session_state.get("concept_difficulty", "Intermediate")
+    concepts = CONCEPTS_BY_DIFFICULTY.get(difficulty, CONCEPTS_BY_DIFFICULTY["Intermediate"])
+    st.session_state.current_concept = random.choice(concepts)
+
+
+def trigger_writing_generator() -> None:
+    """Trigger the random writing generator feature."""
+    st.session_state.show_writing_generator = True
+    st.session_state.show_concept_explainer = False
+    st.session_state.show_bug_debugger = False
+    # Pick a random writing task based on tone
+    tone = st.session_state.get("writing_tone", "Formal")
+    tasks = WRITING_TASKS_BY_TONE.get(tone, WRITING_TASKS_BY_TONE["Formal"])
+    st.session_state.current_writing_task = random.choice(tasks)
+
+
+def trigger_bug_debugger() -> None:
+    """Trigger the random bug debugger feature."""
+    st.session_state.show_bug_debugger = True
+    st.session_state.show_concept_explainer = False
+    st.session_state.show_writing_generator = False
+    # Pick a random buggy code snippet
+    st.session_state.current_bug = random.choice(BUGGY_CODE_SNIPPETS)
+
+
+def generate_concept_prompt(concept: dict, difficulty: str) -> str:
+    """Generate a prompt for the AI to explain a concept."""
+    return f"""Explain the concept of "{concept['topic']}" from the category "{concept['category']}" at a {difficulty} level.
+
+Please provide:
+1. **Simple Explanation** (2-3 sentences for beginners)
+2. **Structured Explanation** (detailed breakdown with key points)
+3. **Real-World Analogy** (relatable comparison)
+4. **Interview Question** (one common interview question on this topic with a brief answer)
+
+Make sure to adjust the complexity based on the {difficulty} level."""
+
+
+def generate_writing_prompt(task: dict, tone: str) -> str:
+    """Generate a prompt for the AI to create writing content."""
+    return f"""Generate a {tone.lower()} {task['type'].lower()} with the following task:
+
+"{task['prompt']}"
+
+Please create a complete, well-written piece that matches the {tone.lower()} tone. Include proper formatting and structure appropriate for a {task['type']}."""
+
+
+def generate_bug_prompt(bug: dict) -> str:
+    """Generate a prompt for the bug debugger feature."""
+    return f"""I'm practicing debugging! Here's a buggy {bug['language']} code snippet:
+
+**Bug Title:** {bug['title']}
+
+```{bug['language']}
+{bug['buggy_code']}
+```
+
+Please analyze this code and provide:
+1. **What's wrong?** - Identify the bug
+2. **Fixed Code** - Show the corrected version
+3. **Explanation** - Why did this bug occur?
+4. **Prevention Tips** - How to avoid this in the future
+
+Help me understand this debugging challenge!"""
+
+
 def render_empty_state(display_name: str) -> None:
-    """Stunning ChatGPT-style welcome screen with animated suggestions."""
+    """Stunning ChatGPT-style welcome screen with animated suggestions and interactive features."""
     
     # Get current model for display
     current_model = st.session_state.get("model_select", MODEL_OPTIONS[0])
@@ -575,56 +934,75 @@ def render_empty_state(display_name: str) -> None:
     
     col1, col2 = st.columns(2)
     with col1:
-        # Card 1: Explain
+        # Card 1: Explain a concept - with difficulty toggle
         st.markdown("""
             <div class="suggestion-card" style="pointer-events: none;">
                 <span class="suggestion-icon">💡</span>
                 <div class="suggestion-title">Explain a concept</div>
-                <div class="suggestion-desc">Break down complex topics into simple terms</div>
+                <div class="suggestion-desc">Random tech concept with explanations & interview Q</div>
             </div>
         """, unsafe_allow_html=True)
-        st.button(
-            "💡 Explain a concept",
-            use_container_width=True,
-            key="sug1",
-            on_click=set_empty_state_action,
-            args=("Explain how neural networks work in simple terms",),
-        )
         
-        # Card 3: Debug
+        # Difficulty toggle
+        diff_col1, diff_col2 = st.columns([2, 3])
+        with diff_col1:
+            st.selectbox(
+                "Difficulty",
+                options=["Beginner", "Intermediate", "Advanced"],
+                key="concept_difficulty",
+                label_visibility="collapsed"
+            )
+        with diff_col2:
+            st.button(
+                "💡 Random Concept",
+                use_container_width=True,
+                key="sug1",
+                on_click=trigger_concept_explainer,
+            )
+        
+        # Card 3: Debug my code - Random bug generator
         st.markdown("""
             <div class="suggestion-card" style="pointer-events: none;">
                 <span class="suggestion-icon">🔧</span>
-                <div class="suggestion-title">Debug my code</div>
-                <div class="suggestion-desc">Find and fix bugs in your code</div>
+                <div class="suggestion-title">Debug Practice</div>
+                <div class="suggestion-desc">Random buggy code snippet to find and fix</div>
             </div>
         """, unsafe_allow_html=True)
         st.button(
-            "🔧 Debug my code",
+            "🔧 Random Bug Challenge",
             use_container_width=True,
             key="sug3",
-            on_click=set_empty_state_action,
-            args=("Help me debug this code: ",),
+            on_click=trigger_bug_debugger,
         )
             
     with col2:
-        # Card 2: Write
+        # Card 2: Write something - with tone control
         st.markdown("""
             <div class="suggestion-card" style="pointer-events: none;">
                 <span class="suggestion-icon">✍️</span>
                 <div class="suggestion-title">Write something</div>
-                <div class="suggestion-desc">Generate emails, docs, or creative content</div>
+                <div class="suggestion-desc">Random writing task: emails, docs, creative content</div>
             </div>
         """, unsafe_allow_html=True)
-        st.button(
-            "✍️ Write something",
-            use_container_width=True,
-            key="sug2",
-            on_click=set_empty_state_action,
-            args=("Write a professional email about ",),
-        )
         
-        # Card 4: Image
+        # Tone toggle
+        tone_col1, tone_col2 = st.columns([2, 3])
+        with tone_col1:
+            st.selectbox(
+                "Tone",
+                options=["Formal", "Friendly", "Humorous"],
+                key="writing_tone",
+                label_visibility="collapsed"
+            )
+        with tone_col2:
+            st.button(
+                "✍️ Random Writing",
+                use_container_width=True,
+                key="sug2",
+                on_click=trigger_writing_generator,
+            )
+        
+        # Card 4: Image Analysis (unchanged)
         st.markdown("""
             <div class="suggestion-card" style="pointer-events: none;">
                 <span class="suggestion-icon">🖼️</span>
@@ -640,6 +1018,128 @@ def render_empty_state(display_name: str) -> None:
             args=("",),
             kwargs={"show_image_upload": True},
         )
+    
+    # Show feature panels based on selection
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Concept Explainer Panel
+    if st.session_state.get("show_concept_explainer") and st.session_state.get("current_concept"):
+        concept = st.session_state.current_concept
+        difficulty = st.session_state.get("concept_difficulty", "Intermediate")
+        
+        with st.container():
+            st.markdown(f"""
+                <div style="background: linear-gradient(145deg, #2a2a2a 0%, #1f1f1f 100%); 
+                            border: 1px solid #10a37f; border-radius: 16px; padding: 1.5rem; margin: 1rem 0;">
+                    <h3 style="color: #10a37f; margin-bottom: 0.5rem;">💡 Random Concept Challenge</h3>
+                    <p style="color: #8e8e8e; font-size: 0.9rem;">Difficulty: <strong style="color: #ececec;">{difficulty}</strong></p>
+                    <div style="background: #2f2f2f; border-radius: 8px; padding: 1rem; margin-top: 0.5rem;">
+                        <span style="color: #10a37f; font-size: 0.8rem;">{concept['category']}</span>
+                        <h4 style="color: #fff; margin: 0.5rem 0;">{concept['topic']}</h4>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            col_a, col_b, col_c = st.columns([2, 2, 1])
+            with col_a:
+                if st.button("🚀 Explain This!", key="send_concept", use_container_width=True):
+                    prompt = generate_concept_prompt(concept, difficulty)
+                    st.session_state.pending_prompt = prompt
+                    st.session_state.auto_send_prompt = True
+                    st.session_state.show_concept_explainer = False
+                    st.rerun()
+            with col_b:
+                if st.button("🎲 New Concept", key="new_concept", use_container_width=True):
+                    trigger_concept_explainer()
+                    st.rerun()
+            with col_c:
+                if st.button("✕", key="close_concept"):
+                    st.session_state.show_concept_explainer = False
+                    st.rerun()
+    
+    # Writing Generator Panel
+    if st.session_state.get("show_writing_generator") and st.session_state.get("current_writing_task"):
+        task = st.session_state.current_writing_task
+        tone = st.session_state.get("writing_tone", "Formal")
+        
+        with st.container():
+            st.markdown(f"""
+                <div style="background: linear-gradient(145deg, #2a2a2a 0%, #1f1f1f 100%); 
+                            border: 1px solid #f59e0b; border-radius: 16px; padding: 1.5rem; margin: 1rem 0;">
+                    <h3 style="color: #f59e0b; margin-bottom: 0.5rem;">✍️ Random Writing Task</h3>
+                    <p style="color: #8e8e8e; font-size: 0.9rem;">Tone: <strong style="color: #ececec;">{tone}</strong></p>
+                    <div style="background: #2f2f2f; border-radius: 8px; padding: 1rem; margin-top: 0.5rem;">
+                        <span style="color: #f59e0b; font-size: 0.8rem;">{task['type']}</span>
+                        <h4 style="color: #fff; margin: 0.5rem 0; font-size: 1rem;">{task['prompt']}</h4>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            col_a, col_b, col_c = st.columns([2, 2, 1])
+            with col_a:
+                if st.button("🚀 Generate This!", key="send_writing", use_container_width=True):
+                    prompt = generate_writing_prompt(task, tone)
+                    st.session_state.pending_prompt = prompt
+                    st.session_state.auto_send_prompt = True
+                    st.session_state.show_writing_generator = False
+                    st.rerun()
+            with col_b:
+                if st.button("🎲 New Task", key="new_writing", use_container_width=True):
+                    trigger_writing_generator()
+                    st.rerun()
+            with col_c:
+                if st.button("✕", key="close_writing"):
+                    st.session_state.show_writing_generator = False
+                    st.rerun()
+    
+    # Bug Debugger Panel
+    if st.session_state.get("show_bug_debugger") and st.session_state.get("current_bug"):
+        bug = st.session_state.current_bug
+        
+        with st.container():
+            st.markdown(f"""
+                <div style="background: linear-gradient(145deg, #2a2a2a 0%, #1f1f1f 100%); 
+                            border: 1px solid #ef4444; border-radius: 16px; padding: 1.5rem; margin: 1rem 0;">
+                    <h3 style="color: #ef4444; margin-bottom: 0.5rem;">🔧 Debug Challenge</h3>
+                    <p style="color: #8e8e8e; font-size: 0.9rem;">Language: <strong style="color: #ececec;">{bug['language'].upper()}</strong></p>
+                    <div style="background: #2f2f2f; border-radius: 8px; padding: 1rem; margin-top: 0.5rem;">
+                        <span style="color: #ef4444; font-size: 0.8rem;">🐛 Bug Type</span>
+                        <h4 style="color: #fff; margin: 0.5rem 0;">{bug['title']}</h4>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Show buggy code
+            st.markdown("**🔍 Find the bug in this code:**")
+            st.code(bug['buggy_code'], language=bug['language'])
+            
+            col_a, col_b, col_c, col_d = st.columns([2, 2, 2, 1])
+            with col_a:
+                if st.button("🚀 Analyze Bug!", key="send_bug", use_container_width=True):
+                    prompt = generate_bug_prompt(bug)
+                    st.session_state.pending_prompt = prompt
+                    st.session_state.auto_send_prompt = True
+                    st.session_state.show_bug_debugger = False
+                    st.rerun()
+            with col_b:
+                if st.button("👀 Show Answer", key="show_answer", use_container_width=True):
+                    st.session_state[f"show_bug_answer_{id(bug)}"] = True
+            with col_c:
+                if st.button("🎲 New Bug", key="new_bug", use_container_width=True):
+                    trigger_bug_debugger()
+                    st.rerun()
+            with col_d:
+                if st.button("✕", key="close_bug"):
+                    st.session_state.show_bug_debugger = False
+                    st.rerun()
+            
+            # Show answer if requested
+            if st.session_state.get(f"show_bug_answer_{id(bug)}"):
+                st.markdown("---")
+                st.markdown("**✅ Fixed Code:**")
+                st.code(bug['fixed_code'], language=bug['language'])
+                st.markdown(f"**💡 Explanation:** {bug['explanation']}")
+                st.markdown(f"**🛡️ Prevention:** {bug['prevention']}")
     
 
 
@@ -1282,6 +1782,7 @@ def main() -> None:
     # Input toolbar and chat input in linear layout
     st.markdown("---")
     
+
     # Create linear input layout: text input (left) -> voice (middle) -> image (right)
     input_col1, input_col2, input_col3 = st.columns([8, 0.8, 0.8])
     
@@ -1479,6 +1980,21 @@ def main() -> None:
         
         handle_user_prompt(
             voice_prompt.strip(),
+            mode,
+            system_prompt.strip(),
+            model,
+            image=st.session_state.uploaded_image
+        )
+        st.rerun()
+    
+    # Handle auto-send for enhanced buttons (Concept Explainer, Writing Generator, Bug Debugger)
+    if st.session_state.get("auto_send_prompt", False) and st.session_state.get("pending_prompt", ""):
+        pending_prompt = st.session_state.pending_prompt
+        st.session_state.pending_prompt = ""
+        st.session_state.auto_send_prompt = False
+        
+        handle_user_prompt(
+            pending_prompt.strip(),
             mode,
             system_prompt.strip(),
             model,
