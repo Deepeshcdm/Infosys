@@ -43,7 +43,7 @@ except ImportError:
 
 
 CHAT_MODES = ["Chat", "Generate Code", "Explain Code"]
-MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1"]
+MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1", "qwen3-vl:2b"]
 DEFAULT_SYSTEM_PROMPT = "You are ChatGPT, a large language model trained by OpenAI. You are helpful, creative, clever, and very friendly."
 CODE_BLOCK_PATTERN = re.compile(r"```(?P<lang>[\w+\-]*)\n(?P<code>.*?)```", re.DOTALL)
 
@@ -100,6 +100,9 @@ def init_session_state() -> None:
     st.session_state.setdefault("show_image_upload", False)
     st.session_state.setdefault("show_voice_input", False)
     st.session_state.setdefault("new_chat_name", "")
+    st.session_state.setdefault("show_rename_input", False)
+    st.session_state.setdefault("rename_chat_title", "")
+    st.session_state.setdefault("auto_send_voice", False)
 
     ensure_current_chat()
 
@@ -373,7 +376,7 @@ def transcribe_audio(audio_bytes: bytes) -> str:
         return f"[Audio processing error: {e}]"
 
 
-def stream_generate(model: str, prompt: str):
+def stream_generate(model: str, prompt: str, image: Optional[Image.Image] = None):
     """Stream generate response from Ollama API as a generator."""
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -381,6 +384,14 @@ def stream_generate(model: str, prompt: str):
         "prompt": prompt,
         "stream": True
     }
+
+    if image is not None:
+        encoded_image = image_to_base64(image)
+        payload["image"] = {
+            "name": "uploaded.png",
+            "mime_type": "image/png",
+            "data": encoded_image,
+        }
 
     try:
         with requests.post(OLLAMA_API_URL, headers=headers, json=payload, stream=True, timeout=60) as resp:
@@ -492,6 +503,14 @@ def delete_chat(chat_id: str) -> None:
                 st.session_state.current_chat_id = create_persistent_chat()
 
 
+def rename_chat(chat_id: str, new_title: str) -> None:
+    """Rename a chat with a new title."""
+    if chat_id in st.session_state.chats and new_title.strip():
+        st.session_state.chats[chat_id]["title"] = new_title.strip()
+        st.session_state.show_rename_input = False
+        st.session_state.rename_chat_title = ""
+
+
 def summarize_title(prompt: str) -> str:
     """Generate a short title from the first user message."""
     condensed = prompt.strip().splitlines()[0][:40]
@@ -595,8 +614,8 @@ def send_to_backend(
     # --------------------
     # Ollama Models (llama3, deepseek-r1)
     # --------------------
-    if model in ["llama3", "deepseek-r1"]:
-        yield from stream_generate(model, full_prompt)
+    if model in ["llama3", "deepseek-r1", "qwen3-vl:2b"]:
+        yield from stream_generate(model, full_prompt, image)
         return
 
     # --------------------
@@ -711,40 +730,120 @@ def handle_new_chat_button() -> None:
     st.session_state.new_chat_name = ""
 
 
+def search_in_chat(chat_id: str, query: str) -> tuple[bool, str]:
+    """Search for query in chat title and messages. Returns (found, match_type)."""
+    chat = st.session_state.chats[chat_id]
+    query_lower = query.lower()
+    
+    # Search in title
+    if query_lower in chat["title"].lower():
+        return True, "title"
+    
+    # Search in message content
+    for message in chat.get("messages", []):
+        content = message.get("content", "").lower()
+        if query_lower in content:
+            return True, "content"
+    
+    return False, ""
+
+
 def render_chat_list() -> None:
-    """Renderable list of saved chats similar to ChatGPT sidebar."""
+    """Renderable list of saved chats similar to ChatGPT sidebar with enhanced search."""
     if not st.session_state.chats:
         st.caption("No saved chats yet.")
         return
 
-    chat_ids = list(st.session_state.chats.keys())
+    all_chat_ids = list(st.session_state.chats.keys())
     query = st.session_state.chat_search.strip().lower()
+    
+    # Enhanced search: filter by title or content
     if query:
-        chat_ids = [cid for cid in chat_ids if query in st.session_state.chats[cid]["title"].lower()]
+        matched_chats = {}
+        for cid in all_chat_ids:
+            found, match_type = search_in_chat(cid, query)
+            if found:
+                matched_chats[cid] = match_type
+        
+        chat_ids = list(matched_chats.keys())
+        
         if not chat_ids:
-            st.caption("No chats match your search.")
+            st.warning(f"🔍 No chats found matching '{st.session_state.chat_search}'")
+            st.caption("Try searching with different keywords or check your chat titles and messages.")
             return
+        
+        # Show search results count
+        st.success(f"✓ Found {len(chat_ids)} chat(s) matching '{st.session_state.chat_search}'")
+    else:
+        chat_ids = all_chat_ids
 
     current_id = st.session_state.current_chat_id
-    if current_id not in chat_ids:
-        current_id = chat_ids[0]
-        st.session_state.current_chat_id = current_id
-
-    index = chat_ids.index(current_id)
+    
+    # Only switch to first result if current chat is not in the filtered list AND we have results
+    if current_id not in chat_ids and chat_ids:
+        # Don't auto-switch, just show the list without selection
+        # User can click to switch
+        index = 0
+    else:
+        index = chat_ids.index(current_id) if current_id in chat_ids else 0
+    
+    # Format function to show match indicator
+    def format_chat_title(cid: str) -> str:
+        title = st.session_state.chats[cid]["title"]
+        if query:
+            _, match_type = search_in_chat(cid, query)
+            if match_type == "title":
+                return f"📌 {title}"
+            elif match_type == "content":
+                return f"💬 {title}"
+        return title
+    
     selection = st.radio(
         "Your chats",
         options=chat_ids,
         index=index,
-        format_func=lambda cid: st.session_state.chats[cid]["title"],
+        format_func=format_chat_title,
         label_visibility="collapsed",
         key="chat_history_selector",
+        help="📌 = Match in title, 💬 = Match in messages" if query else None
     )
     if selection != current_id:
         st.session_state.current_chat_id = selection
-
-    if st.button("🗑️ Delete selected chat", key="delete_selected_chat", use_container_width=True):
-        delete_chat(st.session_state.current_chat_id)
         st.rerun()
+
+    # Chat actions
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✏️ Rename", key="rename_chat_btn", use_container_width=True):
+            st.session_state.show_rename_input = not st.session_state.show_rename_input
+            if st.session_state.show_rename_input:
+                current_title = st.session_state.chats[st.session_state.current_chat_id]["title"]
+                st.session_state.rename_chat_title = current_title
+    
+    with col2:
+        if st.button("🗑️ Delete", key="delete_selected_chat", use_container_width=True):
+            delete_chat(st.session_state.current_chat_id)
+            st.rerun()
+    
+    # Rename input section
+    if st.session_state.show_rename_input:
+        new_title = st.text_input(
+            "New chat title",
+            value=st.session_state.rename_chat_title,
+            key="rename_input",
+            placeholder="Enter new title..."
+        )
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("✓ Save", key="save_rename", use_container_width=True):
+                if new_title.strip():
+                    rename_chat(st.session_state.current_chat_id, new_title)
+                    st.rerun()
+        with col_b:
+            if st.button("✕ Cancel", key="cancel_rename", use_container_width=True):
+                st.session_state.show_rename_input = False
+                st.rerun()
 
 
 def render_sidebar() -> tuple[str, str, str]:
@@ -873,7 +972,7 @@ def render_input_toolbar() -> tuple[Optional[Image.Image], str]:
     # Voice input section
     if st.session_state.show_voice_input:
         with st.container():
-            st.info("🎤 Click below to record your voice message")
+            st.info("🎤 Record your voice message (auto-transcription enabled)")
             
             audio_value = st.audio_input(
                 "Record your message",
@@ -884,32 +983,110 @@ def render_input_toolbar() -> tuple[Optional[Image.Image], str]:
             if audio_value:
                 st.audio(audio_value)
                 
-                if st.button("📝 Transcribe", use_container_width=True):
-                    with st.spinner("Transcribing..."):
+                # Auto-transcribe when audio is recorded
+                if audio_value and "last_audio_hash" not in st.session_state or st.session_state.get("last_audio_hash") != hash(audio_value.getvalue()):
+                    st.session_state.last_audio_hash = hash(audio_value.getvalue())
+                    
+                    with st.spinner("🎙️ Auto-transcribing..."):
                         audio_bytes = audio_value.read()
                         
                         if SPEECH_RECOGNITION_AVAILABLE:
-                            # For WAV files from st.audio_input
+                            tmp_path = None
                             try:
                                 import wave
                                 import tempfile
+                                import os
+                                import time
                                 
                                 # Save to temp file for speech recognition
                                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                                     tmp.write(audio_bytes)
                                     tmp_path = tmp.name
                                 
+                                # Ensure file is closed before using it
+                                time.sleep(0.1)
+                                
                                 recognizer = sr.Recognizer()
                                 with sr.AudioFile(tmp_path) as source:
                                     audio_data = recognizer.record(source)
+                                
+                                # Ensure AudioFile is closed before cleanup
+                                voice_text = recognizer.recognize_google(audio_data)
+                                st.session_state.voice_text = voice_text
+                                st.session_state.auto_send_voice = True
+                                
+                                st.success(f"✅ Transcribed: {voice_text}")
+                                st.info("💬 Sending to AI automatically...")
+                                st.rerun()
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Transcription error: {e}")
+                                st.session_state.voice_text = ""
+                            finally:
+                                # Clean up temp file with retry
+                                if tmp_path and os.path.exists(tmp_path):
+                                    for i in range(3):  # Try 3 times
+                                        try:
+                                            os.unlink(tmp_path)
+                                            break
+                                        except PermissionError:
+                                            time.sleep(0.1)  # Wait a bit and retry
+                                        except Exception:
+                                            break  # Give up on other errors
+                        else:
+                            st.warning("⚠️ Install `SpeechRecognition` for auto-transcription: `pip install SpeechRecognition`")
+                
+                # Manual transcribe button as backup
+                col_manual, col_clear = st.columns(2)
+                with col_manual:
+                    if st.button("🔄 Re-transcribe", use_container_width=True):
+                        with st.spinner("🎙️ Transcribing..."):
+                            audio_bytes = audio_value.read()
+                            
+                            if SPEECH_RECOGNITION_AVAILABLE:
+                                tmp_path = None
+                                try:
+                                    import wave
+                                    import tempfile
+                                    import os
+                                    import time
+                                    
+                                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                        tmp.write(audio_bytes)
+                                        tmp_path = tmp.name
+                                    
+                                    # Ensure file is closed before using it
+                                    time.sleep(0.1)
+                                    
+                                    recognizer = sr.Recognizer()
+                                    with sr.AudioFile(tmp_path) as source:
+                                        audio_data = recognizer.record(source)
+                                    
+                                    # Ensure AudioFile is closed before cleanup
                                     voice_text = recognizer.recognize_google(audio_data)
                                     st.session_state.voice_text = voice_text
-                                    st.success(f"Transcribed: {voice_text}")
-                            except Exception as e:
-                                st.error(f"Transcription error: {e}")
-                                st.session_state.voice_text = ""
-                        else:
-                            st.warning("Install `SpeechRecognition` and `pydub` for transcription: `pip install SpeechRecognition pydub`")
+                                    
+                                    st.success(f"✅ Re-transcribed: {voice_text}")
+                                except Exception as e:
+                                    st.error(f"❌ Transcription error: {e}")
+                                finally:
+                                    # Clean up temp file with retry
+                                    if tmp_path and os.path.exists(tmp_path):
+                                        for i in range(3):  # Try 3 times
+                                            try:
+                                                os.unlink(tmp_path)
+                                                break
+                                            except PermissionError:
+                                                time.sleep(0.1)  # Wait a bit and retry
+                                            except Exception:
+                                                break  # Give up on other errors
+                
+                with col_clear:
+                    if st.button("🗑️ Clear", use_container_width=True):
+                        st.session_state.voice_text = ""
+                        if "last_audio_hash" in st.session_state:
+                            del st.session_state.last_audio_hash
+                        st.rerun()
     
     # Show pending image preview
     if st.session_state.uploaded_image and not st.session_state.show_image_upload:
@@ -947,19 +1124,33 @@ def main() -> None:
     st.markdown("---")
     attached_image, voice_text = render_input_toolbar()
     
+    # Handle auto-send voice input
+    if st.session_state.get("auto_send_voice", False) and st.session_state.get("voice_text", ""):
+        voice_prompt = st.session_state.voice_text
+        st.session_state.voice_text = ""
+        st.session_state.auto_send_voice = False
+        st.session_state.show_voice_input = False
+        
+        handle_user_prompt(
+            voice_prompt.strip(),
+            mode,
+            system_prompt.strip(),
+            model,
+            image=attached_image
+        )
+        st.rerun()
+    
     # Pre-fill prompt if set
     default_prompt = st.session_state.get("prefill_prompt", "")
     if default_prompt:
         st.session_state.prefill_prompt = ""
     
-    # Use voice text as default if available
-    if voice_text and st.session_state.voice_text:
+    # Use voice text as default if available (for manual input)
+    if voice_text and st.session_state.voice_text and not st.session_state.get("auto_send_voice", False):
         default_prompt = voice_text
         st.session_state.voice_text = ""
     
     # Chat input
-    # The above code in Python is creating a variable `placeholder` and assigning it the value
-    # "Message Code Gen AI...". The `
     placeholder = "Message Code Gen AI..."
     if attached_image:
         placeholder = "Ask about this image..."
