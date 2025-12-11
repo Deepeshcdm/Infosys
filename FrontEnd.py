@@ -17,6 +17,7 @@
 
 import base64
 import io
+import json
 import re
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 #"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" = ""
 GROQ_BASE_URL_DIRECT = ""
 GEMINI_API_KEY_DIRECT = ""
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
 # Audio processing imports
 try:
@@ -41,7 +43,7 @@ except ImportError:
 
 
 CHAT_MODES = ["Chat", "Generate Code", "Explain Code"]
-MODEL_OPTIONS = ["gpt-oss-120b", "gemini-2.5-flash", "deepseek-r1"]
+MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1"]
 DEFAULT_SYSTEM_PROMPT = "You are ChatGPT, a large language model trained by OpenAI. You are helpful, creative, clever, and very friendly."
 CODE_BLOCK_PATTERN = re.compile(r"```(?P<lang>[\w+\-]*)\n(?P<code>.*?)```", re.DOTALL)
 
@@ -371,6 +373,46 @@ def transcribe_audio(audio_bytes: bytes) -> str:
         return f"[Audio processing error: {e}]"
 
 
+def stream_generate(model: str, prompt: str):
+    """Stream generate response from Ollama API as a generator."""
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": True
+    }
+
+    try:
+        with requests.post(OLLAMA_API_URL, headers=headers, json=payload, stream=True, timeout=60) as resp:
+            resp.raise_for_status()
+            
+            for raw_line in resp.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                
+                line = raw_line.strip()
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                
+                chunk_text = None
+                if "message" in obj and isinstance(obj["message"], dict):
+                    chunk_text = obj["message"].get("content")
+                elif "response" in obj:
+                    chunk_text = obj.get("response")
+                
+                if chunk_text:
+                    yield chunk_text
+                
+                if obj.get("done") is True:
+                    break
+    except requests.exceptions.RequestException as e:
+        yield f"[Error connecting to Ollama: {e}. Make sure Ollama is running locally.]"
+    except Exception as e:
+        yield f"[Ollama API error: {e}]"
+
+
 def parse_and_render_segments(content: str) -> None:
     """Render Markdown text mixed with fenced code blocks."""
     start = 0
@@ -463,20 +505,19 @@ def send_to_backend(
     system_prompt: str,
     model: str,
     image: Optional[Image.Image] = None,
-) -> str:
-    """Send messages to the selected backend model and return assistant text.
+):
+    """Send messages to the selected backend model and yield assistant text chunks for streaming.
 
     Behavior:
     - If `model` == "gpt-oss-120b" use the Groq/OpenAI-compatible Responses API.
       The function will first attempt to use the `openai.OpenAI` SDK if available,
       otherwise it will POST to the configured `GROQ_BASE_URL` using `requests`.
-    - If `model` == "gemini-2.5-flash" it will try the `google.genai` SDK.
+    - For llama3/deepseek-r1, uses Ollama API.
     - For other modes/models the function falls back to a friendly stub message.
 
     Keys:
     - Put credentials in `st.secrets` or environment variables:
       - `GROQ_API_KEY` and optional `GROQ_BASE_URL` for Groq/OpenAI-compatible API
-      - `GENAI_API_KEY` for Google GenAI SDK
     """
 
     user_prompt = next(
@@ -493,7 +534,8 @@ def send_to_backend(
             user_prompt = "[Image attached]\n\n" + user_prompt
 
     if not user_prompt:
-        return "Hi there! Send a message or upload an image and I'll respond."
+        yield "Hi there! Send a message or upload an image and I'll respond."
+        return
 
     # --------------------
     # Groq / OpenAI-compatible (gpt-oss-120b)
@@ -506,53 +548,50 @@ def send_to_backend(
 
         groq_base = get_secret_or_env("GROQ_BASE_URL") or GROQ_BASE_URL_DIRECT or "https://api.groq.com/openai/v1"
         if not groq_api_key:
-            return "[GROQ API key not found. Set `GROQ_API_KEY` in Streamlit secrets, environment variables, or `GROQ_API_KEY_DIRECT` in this file.]"
+            yield "[GROQ API key not found. Set `GROQ_API_KEY` in Streamlit secrets, environment variables, or `GROQ_API_KEY_DIRECT` in this file.]"
+            return
 
         try:
-            # Prefer a simple HTTP call to avoid SDK secret-loading issues
-            headers = {"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"}
-            payload = {"input": user_prompt, "model": "openai/gpt-oss-120b"}
-            resp = requests.post(f"{groq_base.rstrip('/')}/responses", json=payload, headers=headers, timeout=30)
-            try:
-                data = resp.json()
-                text = data.get("output_text") or data.get("text") or data.get("result") or str(data)
-            except Exception:
-                text = resp.text
-            return text
+            from openai import OpenAI
+            
+            client = OpenAI(
+                api_key=groq_api_key,
+                base_url=groq_base,
+            )
+            
+            response = client.responses.create(
+                input=user_prompt,
+                model="openai/gpt-oss-120b",
+                stream=True
+            )
+            
+            for event in response:
+                if hasattr(event, "delta"):
+                    delta = event.delta
+                    if hasattr(delta, "text") and delta.text:
+                        yield delta.text
+                    elif isinstance(delta, str):
+                        yield delta
+                elif isinstance(event, str):
+                    yield event
+        except ImportError:
+            yield "[OpenAI SDK not installed. Install: pip install openai]"
         except Exception as http_err:
-            return f"[Error calling Groq/OpenAI endpoint: {http_err}]"
+            yield f"[Error calling Groq/OpenAI endpoint: {http_err}]"
+        return
 
     # --------------------
-    # Google GenAI (gemini-2.5-flash)
+    # Ollama Models (llama3, deepseek-r1)
     # --------------------
-    if model == "gemini-2.5-flash":
-        # Check API key first to avoid SDK attempting to read secrets.toml and erroring
-        genai_api_key = get_secret_or_env("GENAI_API_KEY") or get_secret_or_env("GEMINI_API_KEY")
-        # allow hardcoded fallback for convenience during local testing
-        if not genai_api_key and GEMINI_API_KEY_DIRECT:
-            genai_api_key = GEMINI_API_KEY_DIRECT.strip() or None
-
-        if not genai_api_key:
-            return "[GenAI API key not found. Set `GENAI_API_KEY`/`GEMINI_API_KEY` in Streamlit secrets, environment variables, or `GEMINI_API_KEY_DIRECT` in this file.]"
-
-        try:
-            # Ensure the SDK can see the key via environment before importing
-            os.environ.setdefault("GEMINI_API_KEY", genai_api_key)
-            from google import genai
-
-            client = genai.Client(api_key=genai_api_key)
-            resp = client.models.generate_content(model="gemini-2.5-flash", contents=user_prompt)
-            # SDK may expose .text or .response
-            text = getattr(resp, "text", None) or getattr(resp, "response", None) or str(resp)
-            return text
-        except Exception as e:
-            return f"[GenAI SDK error: {e}. Install `google-genai` and ensure `GEMINI_API_KEY` is configured.]"
+    if model in ["llama3", "deepseek-r1"]:
+        yield from stream_generate(model, user_prompt)
+        return
 
     # --------------------
     # Mode-based helper behavior (existing helpful stubs)
     # --------------------
     if mode == "Generate Code":
-        return (
+        yield (
             f"Here's the code you requested! 🚀\n\n"
             "```python\n"
             "def solution(data):\n"
@@ -567,9 +606,10 @@ def send_to_backend(
             "- Ready to customize\n\n"
             "Would you like me to explain any part or make modifications?"
         )
+        return
 
     if mode == "Explain Code":
-        return (
+        yield (
             "Let me break this down for you! 📚\n\n"
             "**Overview:**\n"
             "The code you shared performs a specific operation with clear logic.\n\n"
@@ -580,9 +620,10 @@ def send_to_backend(
             "**Complexity:** O(n) time, O(1) space\n\n"
             "Any questions about specific parts?"
         )
+        return
 
     # Default fallback
-    return (
+    yield (
         f"Great question! Here's a friendly stub reply while the model call is not configured.\n\n"
         f"Your input: \"{user_prompt[:100]}{'...' if len(user_prompt) > 100 else ''}\"\n\n"
         f"Selected model: `{model}`\n"
@@ -597,7 +638,7 @@ def handle_user_prompt(
     model: str,
     image: Optional[Image.Image] = None
 ) -> None:
-    """Persist the new user prompt, get assistant reply, and re-render."""
+    """Persist the new user prompt, get assistant reply with streaming, and re-render."""
     messages = get_active_messages()
     
     # Create message with optional image
@@ -607,14 +648,30 @@ def handle_user_prompt(
     
     messages.append(user_message)
     
-    assistant_reply = send_to_backend(
-        messages,
-        mode=mode,
-        system_prompt=system_prompt,
-        model=model,
-        image=image,
-    )
-    messages.append({"role": "assistant", "content": assistant_reply})
+    # Display user message
+    with st.chat_message("user", avatar="👤"):
+        if image:
+            st.image(image, width=300)
+        st.markdown(user_prompt)
+    
+    # Display streaming assistant response
+    with st.chat_message("assistant", avatar="✨"):
+        message_placeholder = st.empty()
+        full_response = ""
+        
+        for chunk in send_to_backend(
+            messages,
+            mode=mode,
+            system_prompt=system_prompt,
+            model=model,
+            image=image,
+        ):
+            full_response += chunk
+            message_placeholder.markdown(full_response + "▌")
+        
+        message_placeholder.markdown(full_response)
+    
+    messages.append({"role": "assistant", "content": full_response})
 
     # Clear the uploaded image after sending
     st.session_state.uploaded_image = None
