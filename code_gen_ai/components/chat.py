@@ -1,7 +1,10 @@
 """Chat history and message rendering components."""
 
+import base64
+from io import BytesIO
 from typing import Any, Dict, List
 import streamlit as st
+from PIL import Image
 
 from ..config import CODE_BLOCK_PATTERN
 from ..utils import start_tts, stop_tts
@@ -30,9 +33,19 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
         role = message.get("role", "assistant")
         avatar = "👤" if role == "user" else "✨"
         
+        # Create unique key suffix using index and content hash
+        content_hash = hash(message.get("content", ""))
+        unique_key = f"{idx}_{content_hash}_{role}"
+        
         with st.chat_message(role, avatar=avatar):
-            # Show image if present in message
-            if "image" in message and message["image"]:
+            # Show image if present in message (from base64 or PIL Image)
+            if "image_base64" in message and message["image_base64"]:
+                # Decode base64 image
+                image_data = base64.b64decode(message["image_base64"])
+                image = Image.open(BytesIO(image_data))
+                st.image(image, width=300)
+            elif "image" in message and message["image"]:
+                # Backward compatibility for PIL Images
                 st.image(message["image"], width=300)
             
             st.markdown(f"<div class='chat-bubble'>", unsafe_allow_html=True)
@@ -47,7 +60,7 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
                     is_playing = st.session_state.get("tts_playing") and st.session_state.get("tts_message_index") == idx
                     if st.button(
                         "🔊 Read" if not is_playing else "⏹️ Stop",
-                        key=f"tts_btn_{idx}",
+                        key=f"tts_btn_{unique_key}",
                         help="Read this response aloud",
                         use_container_width=True
                     ):
@@ -59,7 +72,7 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
                 with btn_col2:
                     if st.button(
                         "🔄 Redo",
-                        key=f"regen_btn_{idx}",
+                        key=f"regen_btn_{unique_key}",
                         help="Regenerate this response",
                         use_container_width=True
                     ):
@@ -69,7 +82,7 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
                 with btn_col3:
                     if st.button(
                         "📋 Copy",
-                        key=f"copy_btn_{idx}",
+                        key=f"copy_btn_{unique_key}",
                         help="Copy to clipboard",
                         use_container_width=True
                     ):

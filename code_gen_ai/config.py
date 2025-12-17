@@ -10,10 +10,11 @@ from streamlit.errors import StreamlitSecretNotFoundError
 GROQ_BASE_URL_DIRECT = ""
 GEMINI_API_KEY_DIRECT = ""
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
+OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 
 # Chat Configuration
 CHAT_MODES = ["Chat", "Generate Code", "Explain Code"]
-MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1", "qwen3-vl:2b"]
+MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1", "deepseek-ocr:3b"]
 DEFAULT_SYSTEM_PROMPT = "You are ChatGPT, a large language model trained by OpenAI. You are helpful, creative, clever, and very friendly."
 
 # Regex Patterns

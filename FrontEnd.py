@@ -44,9 +44,10 @@ except ImportError:
 
 
 CHAT_MODES = ["Chat", "Generate Code", "Explain Code"]
-MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1", "qwen3-vl:2b"]
+MODEL_OPTIONS = ["gpt-oss-120b", "llama3", "deepseek-r1", "deepseek-ocr:3b"]
 DEFAULT_SYSTEM_PROMPT = "You are ChatGPT, a large language model trained by OpenAI. You are helpful, creative, clever, and very friendly."
 CODE_BLOCK_PATTERN = re.compile(r"```(?P<lang>[\w+\-]*)\n(?P<code>.*?)```", re.DOTALL)
+OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 
 # Random Concept Explainer Data
 CONCEPTS_BY_DIFFICULTY = {
@@ -127,11 +128,11 @@ BUGGY_CODE_SNIPPETS = [
         "buggy_code": '''def sum_first_n(arr, n):
     """Sum the first n elements of arr"""
     total = 0
-    for i in range(1, n + 1):  # Bug here!
+    for i in range(1, n + 1):  
         total += arr[i]
     return total
 
-# Example: sum_first_n([1, 2, 3, 4, 5], 3) should return 6''',
+''',
         "fixed_code": '''def sum_first_n(arr, n):
     """Sum the first n elements of arr"""
     total = 0
@@ -144,7 +145,7 @@ BUGGY_CODE_SNIPPETS = [
     {
         "language": "python",
         "title": "Mutable default argument",
-        "buggy_code": '''def add_item(item, items=[]):  # Bug here!
+        "buggy_code": '''def add_item(item, items=[]):  
     items.append(item)
     return items
 
@@ -163,12 +164,12 @@ BUGGY_CODE_SNIPPETS = [
         "language": "javascript",
         "title": "Async/Await missing",
         "buggy_code": '''async function fetchUserData(userId) {
-    const response = fetch(`/api/users/${userId}`);  // Bug here!
+    const response = fetch(`/api/users/${userId}`);  
     const data = response.json();
     return data;
 }
 
-// Returns a Promise, not the actual data!''',
+''',
         "fixed_code": '''async function fetchUserData(userId) {
     const response = await fetch(`/api/users/${userId}`);
     const data = await response.json();
@@ -183,11 +184,11 @@ BUGGY_CODE_SNIPPETS = [
         "buggy_code": '''function printNumbers() {
     for (var i = 0; i < 3; i++) {
         setTimeout(function() {
-            console.log(i);  // Bug: prints 3, 3, 3
+            console.log(i);  
         }, 100);
     }
 }
-// Expected: 0, 1, 2  Actual: 3, 3, 3''',
+''',
         "fixed_code": '''function printNumbers() {
     for (let i = 0; i < 3; i++) {
         setTimeout(function() {
@@ -208,9 +209,9 @@ BUGGY_CODE_SNIPPETS = [
         if arr[mid] == target:
             return mid
         elif arr[mid] < target:
-            left = mid  # Bug here!
+            left = mid  
         else:
-            right = mid  # Bug here!
+            right = mid  
     return -1''',
         "fixed_code": '''def find_target(arr, target):
     left, right = 0, len(arr) - 1
@@ -230,10 +231,10 @@ BUGGY_CODE_SNIPPETS = [
         "language": "java",
         "title": "Null pointer exception",
         "buggy_code": '''public String getUserName(User user) {
-    return user.getName().toUpperCase();  // Bug: no null check!
+    return user.getName().toUpperCase();  
 }
 
-// Crashes if user is null or user.getName() returns null''',
+''',
         "fixed_code": '''public String getUserName(User user) {
     if (user == null || user.getName() == null) {
         return "Unknown";
@@ -247,11 +248,11 @@ BUGGY_CODE_SNIPPETS = [
         "language": "python",
         "title": "String comparison bug",
         "buggy_code": '''def check_password(input_pwd, stored_pwd):
-    if input_pwd is stored_pwd:  # Bug here!
+    if input_pwd is stored_pwd:  
         return True
     return False
 
-# May fail even with matching passwords!''',
+''',
         "fixed_code": '''def check_password(input_pwd, stored_pwd):
     if input_pwd == stored_pwd:  # Fixed: use == for value comparison
         return True
@@ -263,14 +264,13 @@ BUGGY_CODE_SNIPPETS = [
         "language": "javascript",
         "title": "Type coercion bug",
         "buggy_code": '''function isAdult(age) {
-    if (age == "18") {  // Bug: loose equality!
+    if (age == "18") {  
         return true;
     }
     return age > 18;
 }
 
-// isAdult("18") returns true (correct by accident)
-// isAdult("19") returns false! (string > number comparison)''',
+''',
         "fixed_code": '''function isAdult(age) {
     const numAge = Number(age);
     if (numAge >= 18) {
@@ -287,7 +287,7 @@ BUGGY_CODE_SNIPPETS = [
         "buggy_code": '''total = 0
 
 def add_to_total(value):
-    total = total + value  # Bug: UnboundLocalError!
+    total = total + value  
     return total
 
 add_to_total(5)''',
@@ -308,10 +308,10 @@ def add_to_total(current_total, value):
         "language": "java",
         "title": "Array index out of bounds",
         "buggy_code": '''public int getLastElement(int[] arr) {
-    return arr[arr.length];  // Bug: off by one!
+    return arr[arr.length];  
 }
 
-// Array of length 5 has indices 0-4, not 0-5''',
+''',
         "fixed_code": '''public int getLastElement(int[] arr) {
     if (arr == null || arr.length == 0) {
         throw new IllegalArgumentException("Array is empty");
@@ -857,49 +857,100 @@ def transcribe_audio(audio_bytes: bytes) -> str:
 def stream_generate(model: str, prompt: str, image: Optional[Image.Image] = None):
     """Stream generate response from Ollama API as a generator."""
     headers = {"Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": True
-    }
-
-    if image is not None:
-        encoded_image = image_to_base64(image)
-        payload["image"] = {
-            "name": "uploaded.png",
-            "mime_type": "image/png",
-            "data": encoded_image,
+    
+    # Use chat API for models like deepseek-ocr:3b
+    if model in ["deepseek-ocr:3b"]:
+        # Build message with images if provided
+        message = {
+            "role": "user",
+            "content": prompt
         }
-
-    try:
-        with requests.post(OLLAMA_API_URL, headers=headers, json=payload, stream=True, timeout=60) as resp:
-            resp.raise_for_status()
+        
+        if image is not None:
+            encoded_image = image_to_base64(image)
+            message["images"] = [encoded_image]
+        
+        payload = {
+            "model": model,
+            "messages": [message],
+            "stream": True
+        }
+        
+        try:
+            response = requests.post(
+                OLLAMA_CHAT_URL,
+                headers=headers,
+                json=payload,
+                stream=True,
+                timeout=120
+            )
+            response.raise_for_status()
             
-            for raw_line in resp.iter_lines(decode_unicode=True):
-                if not raw_line:
+            # Stream and yield only the assistant content
+            for line in response.iter_lines():
+                if not line:
                     continue
                 
-                line = raw_line.strip()
                 try:
-                    obj = json.loads(line)
+                    data = json.loads(line.decode("utf-8"))
                 except json.JSONDecodeError:
                     continue
                 
-                chunk_text = None
-                if "message" in obj and isinstance(obj["message"], dict):
-                    chunk_text = obj["message"].get("content")
-                elif "response" in obj:
-                    chunk_text = obj.get("response")
+                # Extract content from message
+                if "message" in data and "content" in data["message"]:
+                    content = data["message"]["content"]
+                    if content:
+                        yield content
                 
-                if chunk_text:
-                    yield chunk_text
-                
-                if obj.get("done") is True:
+                # Stop when done
+                if data.get("done"):
                     break
-    except requests.exceptions.RequestException as e:
-        yield f"[Error connecting to Ollama: {e}. Make sure Ollama is running locally.]"
-    except Exception as e:
-        yield f"[Ollama API error: {e}]"
+                
+        except requests.exceptions.RequestException as e:
+            yield f"[Error connecting to Ollama: {e}. Make sure Ollama is running locally.]"
+        except Exception as e:
+            yield f"[Ollama API error: {e}]"
+    else:
+        # Use /api/generate for other models (llama3, deepseek-r1)
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": True
+        }
+
+        if image is not None:
+            encoded_image = image_to_base64(image)
+            payload["images"] = [encoded_image]
+
+        try:
+            with requests.post(OLLAMA_API_URL, headers=headers, json=payload, stream=True, timeout=60) as resp:
+                resp.raise_for_status()
+                
+                for raw_line in resp.iter_lines(decode_unicode=True):
+                    if not raw_line:
+                        continue
+                    
+                    line = raw_line.strip()
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    
+                    chunk_text = None
+                    if "message" in obj and isinstance(obj["message"], dict):
+                        chunk_text = obj["message"].get("content")
+                    elif "response" in obj:
+                        chunk_text = obj.get("response")
+                    
+                    if chunk_text:
+                        yield chunk_text
+                    
+                    if obj.get("done") is True:
+                        break
+        except requests.exceptions.RequestException as e:
+            yield f"[Error connecting to Ollama: {e}. Make sure Ollama is running locally.]"
+        except Exception as e:
+            yield f"[Ollama API error: {e}]"
 
 
 def parse_and_render_segments(content: str) -> None:
@@ -925,6 +976,10 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
         role = message.get("role", "assistant")
         avatar = "👤" if role == "user" else "✨"
         
+        # Create unique key suffix using index and content hash
+        content_hash = hash(message.get("content", ""))
+        unique_key = f"{idx}_{content_hash}_{role}"
+        
         with st.chat_message(role, avatar=avatar):
             # Show image if present in message
             if "image" in message and message["image"]:
@@ -942,7 +997,7 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
                     is_playing = st.session_state.get("tts_playing") and st.session_state.get("tts_message_index") == idx
                     if st.button(
                         "🔊 Read" if not is_playing else "⏹️ Stop",
-                        key=f"tts_btn_{idx}",
+                        key=f"tts_btn_{unique_key}",
                         help="Read this response aloud",
                         use_container_width=True
                     ):
@@ -954,7 +1009,7 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
                 with btn_col2:
                     if st.button(
                         "🔄 Redo",
-                        key=f"regen_btn_{idx}",
+                        key=f"regen_btn_{unique_key}",
                         help="Regenerate this response",
                         use_container_width=True
                     ):
@@ -964,7 +1019,7 @@ def render_chat_history(messages: List[Dict[str, Any]]) -> None:
                 with btn_col3:
                     if st.button(
                         "📋 Copy",
-                        key=f"copy_btn_{idx}",
+                        key=f"copy_btn_{unique_key}",
                         help="Copy to clipboard",
                         use_container_width=True
                     ):
@@ -1467,7 +1522,7 @@ def send_to_backend(
     # --------------------
     # Ollama Models (llama3, deepseek-r1)
     # --------------------
-    if model in ["llama3", "deepseek-r1", "qwen3-vl:2b"]:
+    if model in ["llama3", "deepseek-r1", "deepseek-ocr:3b"]:
         yield from stream_generate(model, full_prompt, image)
         return
 

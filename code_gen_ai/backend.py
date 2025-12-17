@@ -8,6 +8,7 @@ from PIL import Image
 
 from .config import (
     OLLAMA_API_URL,
+    OLLAMA_CHAT_URL,
     GROQ_BASE_URL_DIRECT,
     get_secret_or_env,
 )
@@ -17,49 +18,105 @@ from .utils import image_to_base64
 def stream_generate(model: str, prompt: str, image: Optional[Image.Image] = None):
     """Stream generate response from Ollama API as a generator."""
     headers = {"Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": True
-    }
-
-    if image is not None:
-        encoded_image = image_to_base64(image)
-        payload["image"] = {
-            "name": "uploaded.png",
-            "mime_type": "image/png",
-            "data": encoded_image,
+    
+    # Use chat API for models like deepseek-ocr:3b
+    if model in ["deepseek-ocr:3b"]:
+        # Build message with images if provided
+        message = {
+            "role": "user",
+            "content": prompt
         }
-
-    try:
-        with requests.post(OLLAMA_API_URL, headers=headers, json=payload, stream=True, timeout=60) as resp:
-            resp.raise_for_status()
+        
+        if image is not None:
+            encoded_image = image_to_base64(image)
+            message["images"] = [encoded_image]
+        
+        payload = {
+            "model": model,
+            "messages": [message],
+            "stream": True
+        }
+        
+        try:
+            response = requests.post(
+                OLLAMA_CHAT_URL,
+                headers=headers,
+                json=payload,
+                stream=True,
+                timeout=120
+            )
+            response.raise_for_status()
             
-            for raw_line in resp.iter_lines(decode_unicode=True):
-                if not raw_line:
+            # Stream and yield only the assistant content
+            for line in response.iter_lines():
+                if not line:
                     continue
                 
-                line = raw_line.strip()
                 try:
-                    obj = json.loads(line)
+                    data = json.loads(line.decode("utf-8"))
                 except json.JSONDecodeError:
                     continue
                 
-                chunk_text = None
-                if "message" in obj and isinstance(obj["message"], dict):
-                    chunk_text = obj["message"].get("content")
-                elif "response" in obj:
-                    chunk_text = obj.get("response")
+                # Extract content from message
+                if "message" in data and "content" in data["message"]:
+                    content = data["message"]["content"]
+                    if content:
+                        yield content
                 
+                # Stop when done
+                if data.get("done"):
+                    break
+                
+        except requests.exceptions.RequestException as e:
+            yield f"[Error connecting to Ollama: {e}. Make sure Ollama is running locally.]"
+        except Exception as e:
+            yield f"[Ollama API error: {e}]"
+    else:
+        # Use /api/generate for other models (llama3, deepseek-r1)
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": True
+        }
+
+        if image is not None:
+            encoded_image = image_to_base64(image)
+            # Note: /api/generate endpoint may not support images well
+            # Consider using /api/chat for image support
+            payload["images"] = [encoded_image]
+
+        try:
+            response = requests.post(
+                OLLAMA_API_URL,
+                headers=headers,
+                json=payload,
+                stream=True,
+                timeout=60
+            )
+            response.raise_for_status()
+            
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                
+                try:
+                    data = json.loads(line.decode("utf-8"))
+                except json.JSONDecodeError:
+                    continue
+                
+                # Extract content from response field
+                chunk_text = data.get("response")
                 if chunk_text:
                     yield chunk_text
                 
-                if obj.get("done") is True:
+                # Stop when done
+                if data.get("done"):
                     break
-    except requests.exceptions.RequestException as e:
-        yield f"[Error connecting to Ollama: {e}. Make sure Ollama is running locally.]"
-    except Exception as e:
-        yield f"[Ollama API error: {e}]"
+                    
+        except requests.exceptions.RequestException as e:
+            yield f"[Error connecting to Ollama: {e}. Make sure Ollama is running locally.]"
+        except Exception as e:
+            yield f"[Ollama API error: {e}]"
 
 
 def send_to_backend(
@@ -151,9 +208,9 @@ def send_to_backend(
         return
 
     # --------------------
-    # Ollama Models (llama3, deepseek-r1, qwen3-vl:2b)
+    # Ollama Models (llama3, deepseek-r1, deepseek-ocr:3b)
     # --------------------
-    if model in ["llama3", "deepseek-r1", "qwen3-vl:2b"]:
+    if model in ["llama3", "deepseek-r1", "deepseek-ocr:3b"]:
         yield from stream_generate(model, full_prompt, image)
         return
 

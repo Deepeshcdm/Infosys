@@ -27,7 +27,7 @@ A feature-rich Streamlit frontend that provides a ChatGPT-like experience for co
 | `gpt-oss-120b` | Groq API | Fast inference, streaming |
 | `llama3` | Ollama (Local) | Privacy-focused, offline |
 | `deepseek-r1` | Ollama (Local) | Code-specialized |
-| `qwen3-vl:2b` | Ollama (Local) | Vision + Language |
+| `deepseek-ocr:3b` | Ollama (Local) | Vision + Language |
 
 ### Chat Modes
 - **💬 Chat**: General conversation mode
@@ -52,7 +52,7 @@ A feature-rich Streamlit frontend that provides a ChatGPT-like experience for co
 - Upload images (PNG, JPG, JPEG, GIF, WebP)
 - AI-powered image analysis using vision models
 - Preview images before sending
-- Works with `qwen3-vl:2b` model
+- Works with `deepseek-ocr:3b` model
 
 ### 🎤 **Voice Input**
 - **Audio Recording**: Record voice messages directly
@@ -346,7 +346,7 @@ curl https://ollama.ai/install.sh | sh
 # Pull models
 ollama pull llama3
 ollama pull deepseek-r1
-ollama pull qwen3-vl:2b
+ollama pull deepseek-ocr:3b
 
 # Start Ollama server
 ollama serve
